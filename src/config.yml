@@ -1,0 +1,20 @@
+# data
+data_name: CNN_DAILYMAILS
+max_seq_length: 100
+
+# model
+model_name: bert
+
+
+
+batch_size:
+  train: 40
+  test: 40
+shuffle:
+  train: True
+  test: False
+
+
+device: cuda
+num_workers: 1
+seed: 0
