@@ -1,7 +1,8 @@
 import torch
+import numpy as np
+import math
 
 from config import cfg
-
 
 def get_input_from_batch(batch):
     enc_batch = batch["input_batch"].transpose(0,1)
@@ -53,3 +54,82 @@ def get_output_from_batch(batch):
 
     return dec_batch, dec_mask_batch, dec_index_batch, target_gate, target_ptr #, dec_padding_mask, max_dec_len, dec_lens_var, target_batch
 
+def _gen_bias_mask(max_length):
+    """
+    Generates bias values (-Inf) to mask future timesteps during attention
+    """
+    np_mask = np.triu(np.full([max_length, max_length], -np.inf), 1)
+    torch_mask = torch.from_numpy(np_mask).type(torch.FloatTensor)
+    
+    return torch_mask.unsqueeze(0).unsqueeze(1)
+
+def _gen_timing_signal(length, channels, min_timescale=1.0, max_timescale=1.0e4):
+    """
+    Generates a [1, length, channels] timing signal consisting of sinusoids
+    Adapted from:
+    https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
+    """
+    position = np.arange(length)
+    num_timescales = channels // 2
+    log_timescale_increment = ( math.log(float(max_timescale) / float(min_timescale)) / (float(num_timescales) - 1))
+    inv_timescales = min_timescale * np.exp(np.arange(num_timescales).astype(np.float) * -log_timescale_increment)
+    scaled_time = np.expand_dims(position, 1) * np.expand_dims(inv_timescales, 0)
+
+    signal = np.concatenate([np.sin(scaled_time), np.cos(scaled_time)], axis=1)
+    signal = np.pad(signal, [[0, 0], [0, channels % 2]], 'constant', constant_values=[0.0, 0.0])
+    signal =  signal.reshape([1, length, channels])
+
+    return torch.from_numpy(signal).type(torch.FloatTensor)
+
+
+def _get_attn_subsequent_mask(size):
+    """
+    Get an attention mask to avoid using the subsequent info.
+    Args:
+        size: int
+    Returns:
+        (`LongTensor`):
+        * subsequent_mask `[1 x size x size]`
+    """
+    attn_shape = (1, size, size)
+    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
+    subsequent_mask = torch.from_numpy(subsequent_mask)
+    if cfg['device'] == 'cuda':
+        return subsequent_mask.cuda()
+    else:
+        return subsequent_mask
+
+def text_input2bert_input(example, bert_tokenizer, seq_length=cfg['max_seq_length']):
+    tokens_a = bert_tokenizer.tokenize(example.text_a)
+    tokens_b = None
+    # Account for [CLS] and [SEP] with "- 2"
+    if len(tokens_a) > seq_length - 2:
+        tokens_a = tokens_a[0:(seq_length - 2)]
+
+    tokens = [] # equals raw text tokens 
+    input_type_ids = [] # equals segments_ids
+    tokens.append("[CLS]")
+    input_type_ids.append(0)
+    for token in tokens_a:
+        tokens.append(token)
+        input_type_ids.append(0)
+    tokens.append("[SEP]")
+    input_type_ids.append(0)
+
+    input_ids = bert_tokenizer.convert_tokens_to_ids(tokens) # WordPiece embedding rep
+
+    # The mask has 1 for real tokens and 0 for padding tokens. Only real
+    # tokens are attended to.
+    input_mask = [1] * len(input_ids)
+
+    # Zero-pad up to the sequence length.
+    while len(input_ids) < seq_length:
+        input_ids.append(0)
+        input_mask.append(0)
+        input_type_ids.append(0)
+
+    input_ids_batch = torch.tensor(input_ids, dtype=torch.long)
+    input_mask_batch = torch.tensor(input_mask, dtype=torch.long)
+    example_index_batch = torch.zeros(input_ids_batch.size(), dtype=torch.long)
+
+    return input_ids_batch, input_mask_batch, example_index_batch

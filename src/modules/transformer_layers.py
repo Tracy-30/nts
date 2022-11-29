@@ -7,14 +7,12 @@ from torch.autograd import Variable
 import torch.nn.init as I
 import numpy as np
 import math
-from utils import config
-from utils.beam_omt import Translator
 # from utils.beam_ptr import BeamSearch
 import pprint
 from tqdm import tqdm
 pp = pprint.PrettyPrinter(indent=1)
 from pytorch_pretrained_bert.tokenization import BertTokenizer
-from rouge import Rouge
+# from rouge import Rouge
 
 class EncoderLayer(nn.Module):
     """
@@ -264,10 +262,10 @@ class MultiHeadAttention(nn.Module):
         #     logits += self.bias_mask[:, :, :logits.shape[-2], :logits.shape[-1]].type_as(logits.data)
         
         ## attention weights 
-        if config.split_copy_head:
-            attention_weights = logits[:,0] # get the attention from first head as copy distribution
-        else:
-            attention_weights = logits.sum(dim=1)/self.num_heads
+        # if cfg['split_copy_head']:
+        #     attention_weights = logits[:,0] # get the attention from first head as copy distribution
+        # else:
+        attention_weights = logits.sum(dim=1)/self.num_heads
         
 
         # Convert to probabilites
@@ -374,52 +372,6 @@ class LayerNorm(nn.Module):
         mean = x.mean(-1, keepdim=True)
         std = x.std(-1, keepdim=True)
         return self.gamma * (x - mean) / (std + self.eps) + self.beta
-
-
-def _gen_bias_mask(max_length):
-    """
-    Generates bias values (-Inf) to mask future timesteps during attention
-    """
-    np_mask = np.triu(np.full([max_length, max_length], -np.inf), 1)
-    torch_mask = torch.from_numpy(np_mask).type(torch.FloatTensor)
-    
-    return torch_mask.unsqueeze(0).unsqueeze(1)
-
-def _gen_timing_signal(length, channels, min_timescale=1.0, max_timescale=1.0e4):
-    """
-    Generates a [1, length, channels] timing signal consisting of sinusoids
-    Adapted from:
-    https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
-    """
-    position = np.arange(length)
-    num_timescales = channels // 2
-    log_timescale_increment = ( math.log(float(max_timescale) / float(min_timescale)) / (float(num_timescales) - 1))
-    inv_timescales = min_timescale * np.exp(np.arange(num_timescales).astype(np.float) * -log_timescale_increment)
-    scaled_time = np.expand_dims(position, 1) * np.expand_dims(inv_timescales, 0)
-
-    signal = np.concatenate([np.sin(scaled_time), np.cos(scaled_time)], axis=1)
-    signal = np.pad(signal, [[0, 0], [0, channels % 2]], 'constant', constant_values=[0.0, 0.0])
-    signal =  signal.reshape([1, length, channels])
-
-    return torch.from_numpy(signal).type(torch.FloatTensor)
-
-
-def _get_attn_subsequent_mask(size):
-    """
-    Get an attention mask to avoid using the subsequent info.
-    Args:
-        size: int
-    Returns:
-        (`LongTensor`):
-        * subsequent_mask `[1 x size x size]`
-    """
-    attn_shape = (1, size, size)
-    subsequent_mask = np.triu(np.ones(attn_shape), k=1).astype('uint8')
-    subsequent_mask = torch.from_numpy(subsequent_mask)
-    if(config.USE_CUDA):
-        return subsequent_mask.cuda()
-    else:
-        return subsequent_mask
 
 
 class OutputLayer(nn.Module):

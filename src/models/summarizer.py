@@ -1,20 +1,13 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 import numpy as np
-import math
-from utils.data import text_input2bert_input
-from model.common_layer import EncoderLayer, DecoderLayer, MultiHeadAttention, Conv, PositionwiseFeedForward, LayerNorm , _gen_bias_mask ,_gen_timing_signal, LabelSmoothing, NoamOpt, _get_attn_subsequent_mask,  get_input_from_batch, get_output_from_batch
-from utils import config
+from models.utils import text_input2bert_input
 import random
-from numpy import random
-import os
+
 import pprint
-from tqdm import tqdm
 pp = pprint.PrettyPrinter(indent=1)
 import os
-import time
 
 from pytorch_pretrained_bert.tokenization import BertTokenizer
 from pytorch_pretrained_bert.modeling import BertModel, BertForMaskedLM
@@ -22,10 +15,13 @@ from pytorch_pretrained_bert.modeling import BertModel, BertForMaskedLM
 from models.decoders import Decoder, Generator
 from config import cfg
 
-
+random.seed(123)
+torch.manual_seed(123)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed_all(123)
 
 class Summarizer(nn.Module):
-    def __init__(self, is_draft, emb_dim, hidden_dim, hop, heads, depth, filter, PAD_idx,
+    def __init__(self, is_draft, emb_dim, hidden_dim, hop, heads, depth, filter,
                     model_file_path=None, is_eval=False, load_optim=False):
         super(Summarizer, self).__init__()
         self.is_draft = is_draft
@@ -41,7 +37,7 @@ class Summarizer(nn.Module):
                                 total_key_depth=depth,total_value_depth=depth,
                                 filter_size=filter)
 
-        self.generator = Generator(cfg['hidden_dim'],cfg['vocab_size'])
+        self.generator = Generator(hidden_dim,cfg['vocab_size'])
 
         self.criterion = nn.NLLLoss(ignore_index=cfg['PAD_idx'])
         self.criterion_ppl = nn.NLLLoss(ignore_index=cfg['PAD_idx'])
@@ -53,7 +49,6 @@ class Summarizer(nn.Module):
             self.generator = self.generator.eval()
 
         self.optimizer = torch.optim.Adam(self.parameters(), lr=cfg['lr'])
-        
         
         if cfg['device'] == 'cuda':
             self.encoder = self.encoder.cuda()
@@ -72,13 +67,13 @@ class Summarizer(nn.Module):
         input_ids_batch, input_mask_batch, example_index_batch, enc_batch_extend_vocab, extra_zeros, _ = get_input_from_batch(batch)
         dec_batch, dec_mask_batch, dec_index_batch, copy_gate, copy_ptr = get_output_from_batch(batch)
         
-        
         self.optimizer.zero_grad()
 
+        # print('input: ', input_ids_batch.shape)
         with torch.no_grad():
-            # encoder_outputs are hidden states from transformer
             encoder_outputs, _ = self.encoder(input_ids_batch, token_type_ids=example_index_batch, 
                                         attention_mask=input_mask_batch, output_all_encoded_layers=False)
+        # print('encoder_output: ', encoder_outputs.shape)
 
         # # Draft Decoder 
         sos_token = torch.LongTensor([cfg['SOS_idx']] * input_ids_batch.size(0)).unsqueeze(1)
@@ -86,19 +81,14 @@ class Summarizer(nn.Module):
 
         dec_batch_shift = torch.cat((sos_token,dec_batch[:, :-1]),1) # shift the decoder input (summary) by one step
         mask_trg = dec_batch_shift.data.eq(cfg['PAD_idx']).unsqueeze(1)
+
         pre_logit1, attn_dist1 = self.decoder(self.embedding(dec_batch_shift),encoder_outputs, (None,mask_trg))
-        
-        # print(pre_logit1.size())
-        ## compute output dist
         logit1 = self.generator(pre_logit1,attn_dist1,enc_batch_extend_vocab, extra_zeros, copy_gate=copy_gate, copy_ptr=copy_ptr, mask_trg= mask_trg)
-        ## loss: NNL if ptr else Cross entropy
         loss1 = self.criterion(logit1.contiguous().view(-1, logit1.size(-1)), dec_batch.contiguous().view(-1))
 
         # Refine Decoder - train using gold label TARGET
         'TODO: turn gold-target-text into BERT insertable representation'
-        pre_logit2, attn_dist2 = self.generate_refinement_output(encoder_outputs, dec_batch, dec_index_batch, extra_zeros, dec_mask_batch)
-        # pre_logit2, attn_dist2 = self.decoder(self.embedding(encoded_gold_target),encoder_outputs, (None,mask_trg))
-        
+        pre_logit2, attn_dist2 = self.generate_refinement_output(encoder_outputs, dec_batch, dec_index_batch, extra_zeros, dec_mask_batch)        
         logit2 = self.generator(pre_logit2,attn_dist2,enc_batch_extend_vocab, extra_zeros, copy_gate=copy_gate, copy_ptr=copy_ptr, mask_trg= None)
         loss2 = self.criterion(logit2.contiguous().view(-1, logit2.size(-1)), dec_batch.contiguous().view(-1))
 
@@ -107,14 +97,22 @@ class Summarizer(nn.Module):
         if train:
             loss.backward()
             self.optimizer.step()
+
         return loss
 
     def eval_one_batch(self, batch):
         draft_seq_batch = self.decoder_greedy(batch)
 
+        input_ids_batch, input_mask_batch, example_index_batch, enc_batch_extend_vocab, extra_zeros, _ = get_input_from_batch(batch)
+        dec_batch, dec_mask_batch, dec_index_batch, copy_gate, copy_ptr = get_output_from_batch(batch)
+
+        with torch.no_grad():
+            encoder_outputs, _ = self.encoder(input_ids_batch, token_type_ids=example_index_batch, 
+                                        attention_mask=input_mask_batch, output_all_encoded_layers=False)
+
         d_seq_input_ids_batch, d_seq_input_mask_batch, d_seq_example_index_batch = text_input2bert_input(draft_seq_batch, self.tokenizer)
-        pre_logit2, attn_dist2 = self.generate_refinement_output(
-            encoder_outputs, d_seq_input_ids_batch, d_seq_example_index_batch, extra_zeros, d_seq_input_mask_batch)
+        pre_logit2, attn_dist2 = self.generate_refinement_output(encoder_outputs, d_seq_input_ids_batch, 
+                                                d_seq_example_index_batch, extra_zeros, d_seq_input_mask_batch)
 
         decoded_words, sent = [], []
         for out, attn_dist in zip(pre_logit2, attn_dist2):
@@ -208,3 +206,48 @@ class Summarizer(nn.Module):
         model_save_path = os.path.join(self.model_dir, 'model_{}_{:.4f}_{:.4f}'.format(iter,loss,r_avg))
         self.best_path = model_save_path
         torch.save(state, model_save_path)
+
+
+def get_input_from_batch(batch):
+    input_ids_batch = batch["ipt_ids"] #.transpose(0,1)
+    input_mask_batch = batch["ipt_mask"] #.transpose(0,1)
+    example_index_batch = batch["ipt_artic_idx"] #.transpose(0,1)
+    batch_size, _ = input_ids_batch.size()
+
+    extra_zeros = None
+    enc_batch_extend_vocab = None
+
+    if cfg['pointer_gen']:
+        enc_batch_extend_vocab = batch["input_ext_vocab_batch"].transpose(0,1)
+        # max_art_oovs is the max over all the article oov list in the batch
+        if batch["max_art_oovs"] > 0:
+            extra_zeros = torch.zeros((batch_size, batch["max_art_oovs"]))
+
+    coverage = None
+    if cfg['is_coverage']:
+        coverage = torch.zeros(enc_batch.size())
+
+    if cfg['device'] == 'cuda':
+        if enc_batch_extend_vocab is not None: enc_batch_extend_vocab = enc_batch_extend_vocab.cuda()
+        if extra_zeros is not None: extra_zeros = extra_zeros.cuda()
+        if coverage is not None: coverage = coverage.cuda()
+
+    return input_ids_batch, input_mask_batch, example_index_batch, enc_batch_extend_vocab, extra_zeros, coverage
+
+def get_output_from_batch(batch):
+    dec_batch = batch["tgt_batch"].transpose(0,1)
+    dec_mask_batch = batch["tgt_mask"]
+    dec_index_batch = batch["tgt_summ_idx"]
+
+    target_gate,target_ptr = None, None
+    # if(cfg['pointer_gen']):
+    #     target_gate = batch["target_gate"]
+    #     target_ptr = batch["target_ptr"]
+    #     target_batch = batch["target_ext_vocab_batch"].transpose(0,1)
+    # else:
+    #     target_batch = dec_batch
+        
+    # dec_lens_var = batch["target_lengths"]
+    # dec_padding_mask = sequence_mask(dec_lens_var, max_len=max_dec_len).float()
+
+    return dec_batch, dec_mask_batch, dec_index_batch, target_gate, target_ptr #, dec_padding_mask, max_dec_len, dec_lens_var, target_batch

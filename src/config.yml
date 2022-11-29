@@ -1,11 +1,24 @@
 # data
 data_name: CNN_DAILYMAILS
+SENTENCE_START: <s>
+SENTENCE_END: </s>
 max_seq_length: 100
+
+vocab_size: 30522
+
+UNK_idx: 0
+PAD_idx: 1
+EOS_idx: 2
+SOS_idx: 3
 
 # model
 model_name: bert
-
-
+pointer_gen: False
+max_enc_steps: 400
+max_dec_step: 100
+hidden_dim: 64
+is_coverage: False
+beam_size: 3
 
 batch_size:
   train: 40
@@ -13,8 +26,10 @@ batch_size:
 shuffle:
   train: True
   test: False
+lr: 1.e-3
+epochs: 30
 
-
-device: cuda
-num_workers: 1
+device: cpu
+num_workers: 0
 seed: 0
+save_path: save/

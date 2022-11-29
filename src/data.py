@@ -24,10 +24,11 @@ def fetch_dataset(data_name):
     return dataset
 
 def input_collate(batch):
-    output = {}
-    for key in batch[0].keys():
-        output[key] = [b[key] for b in batch]
-
+    output = {key: [] for key in batch[0].keys()}
+    for b in batch:
+        for key in b:
+            output[key].append(b[key])
+    
     ipt_feat = output['ipt_feat']
     ipt_ids_batch = torch.tensor([f.input_ids for f in ipt_feat], dtype=torch.long)
     ipt_mask_batch = torch.tensor([f.input_mask for f in ipt_feat], dtype=torch.long)
@@ -51,6 +52,7 @@ def make_data_loader(dataset, sampler=None):
     for split in dataset:
         _batch_size = cfg['batch_size'][split] 
         _shuffle = cfg['shuffle'][split]
+
         if sampler is None:
             data_loader[split] = DataLoader(dataset=dataset[split], batch_size=_batch_size, shuffle=_shuffle,
                                         pin_memory=True, num_workers=cfg['num_workers'], collate_fn=input_collate,
@@ -65,26 +67,26 @@ def make_data_loader(dataset, sampler=None):
 if __name__ == "__main__":
     dataset = fetch_dataset(cfg['data_name'])
     data_loader = make_data_loader(dataset)
-
-
+    
     for batch, input in enumerate(data_loader['train']):
         print(input.keys())
 
         print("data_piece_1:     ")
-        print(input['ipt_ids'][0])
-        print(input['ipt_mask'][0])
-        print(input['ipt_artic_idx'][0])
-        print(input['tgt_batch'][0])
-        print(input['tgt_mask'][0])
-        print(input['tgt_summ_idx'][0])
-        print(input['tgt_txt'][0])
+        print(input['ipt_ids'][0], input['ipt_ids'].shape)
+    #     # print(input['ipt_mask'][0])
+    #     # print(input['ipt_artic_idx'][0])
+    #     # print(input['tgt_batch'][0])
+    #     # print(input['tgt_mask'][0])
+    #     # print(input['tgt_summ_idx'][0])
+    #     # print(input['tgt_txt'][0])
+
         
-        print("data_piece_2:     ")
-        print(input['ipt_ids'][1])
-        print(input['ipt_mask'][1])
-        print(input['ipt_artic_idx'][1])
-        print(input['tgt_batch'][1])
-        print(input['tgt_mask'][1])
-        print(input['tgt_summ_idx'][1])
-        print(input['tgt_txt'][1])
+    #     # print("data_piece_2:     ")
+    #     # print(input['ipt_ids'][1])
+    #     # print(input['ipt_mask'][1])
+    #     # print(input['ipt_artic_idx'][1])
+    #     # print(input['tgt_batch'][1])
+    #     # print(input['tgt_mask'][1])
+    #     # print(input['tgt_summ_idx'][1])
+    #     # print(input['tgt_txt'][1])
         break

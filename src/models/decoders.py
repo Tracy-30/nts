@@ -2,27 +2,9 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-import numpy as np
-import math
-from utils.data import text_input2bert_input
-from model.common_layer import EncoderLayer, DecoderLayer, MultiHeadAttention, Conv, PositionwiseFeedForward, LayerNorm , _gen_bias_mask ,_gen_timing_signal, LabelSmoothing, NoamOpt, _get_attn_subsequent_mask,  get_input_from_batch, get_output_from_batch
-from utils import config
-import random
-from numpy import random
-import os
-import pprint
-from tqdm import tqdm
-pp = pprint.PrettyPrinter(indent=1)
-import os
-import time
-
-from pytorch_pretrained_bert.tokenization import BertTokenizer
-from pytorch_pretrained_bert.modeling import BertModel
-
-random.seed(123)
-torch.manual_seed(123)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(123)
+from modules.transformer_layers import EncoderLayer, DecoderLayer, MultiHeadAttention, Conv, PositionwiseFeedForward, LayerNorm , LabelSmoothing, NoamOpt
+from models.utils import _gen_bias_mask , _gen_timing_signal, _get_attn_subsequent_mask,  get_input_from_batch, get_output_from_batch
+from config import cfg
 
 class Decoder(nn.Module):
     """
@@ -32,7 +14,7 @@ class Decoder(nn.Module):
     Refer Fig.1 in https://arxiv.org/pdf/1706.03762.pdf
     """
     def __init__(self, embedding_size, hidden_size, num_layers, num_heads, total_key_depth, total_value_depth,
-                 filter_size, max_length=config.max_enc_steps, input_dropout=0.0, layer_dropout=0.0, 
+                 filter_size, max_length=cfg['max_enc_steps'], input_dropout=0.0, layer_dropout=0.0, 
                  attention_dropout=0.0, relu_dropout=0.0):
         """
         Parameters:
@@ -83,7 +65,9 @@ class Decoder(nn.Module):
             dec_mask = None
         #Add input dropout
         x = self.input_dropout(inputs)
+        # print("x: ", x.shape)
         # Project to hidden size
+        # print('embedding_prject: ', self.embedding_proj)
         x = self.embedding_proj(x)
         x += self.timing_signal[:, :inputs.shape[1], :].type_as(inputs.data)
 
@@ -102,19 +86,19 @@ class Generator(nn.Module):
     def __init__(self, d_model, vocab):
         super(Generator, self).__init__()
         self.proj = nn.Linear(d_model, vocab)
-        self.p_gen_linear = nn.Linear(config.hidden_dim, 1)
+        self.p_gen_linear = nn.Linear(cfg['hidden_dim'], 1)
         self.copyloss = nn.BCELoss()
         self.m = nn.Sigmoid()
 
     def forward(self, x, attn_dist=None, enc_batch_extend_vocab=None, extra_zeros=None, temp=1, beam_search=False, copy_gate=None, copy_ptr=None, mask_trg=None):
 
-        if config.pointer_gen:
+        if cfg['pointer_gen']:
             p_gen = self.p_gen_linear(x)
             p_gen = self.m(p_gen)
 
         logit = self.proj(x) # simple linear projection
 
-        if config.pointer_gen:
+        if cfg['pointer_gen']:
             vocab_dist = F.softmax(logit/temp, dim=2)
             vocab_dist_ = p_gen * vocab_dist
 

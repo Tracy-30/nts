@@ -24,7 +24,7 @@ class CNNDM(Dataset):
             self.process()
 
         self.dataset = load(os.path.join(self.processed_folder, '{}.pickle'.format(self.split)), mode='pickle')
-        self.total_num = len(self.dataset)
+        self.total_num = len(self.dataset[0])
 
         self.bert_tokenizer = tokenizer
 

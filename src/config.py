@@ -2,7 +2,7 @@ import yaml
 
 global cfg
 if 'cfg' not in globals():
-    with open("/Users/tracy/Desktop/Tracy's Github/NewsTextSum/src/config.yml", 'r') as f:
+    with open("/Users/tracy/Desktop/Github/NewsTextSum/src/config.yml", 'r') as f:
         cfg = yaml.load(f, Loader=yaml.FullLoader)
 
 
