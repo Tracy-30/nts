@@ -1,74 +1,81 @@
-import pickle
+# import pickle
 from config import cfg
-import errno
-import os
+# import errno
+# import os
 import torch
-import numpy as np
+# import numpy as np
 
 
-def check_exists(path): # check if the path exists
-    return os.path.exists(path)
 
-def makedir_exist_ok(path): # make a directory path
-    try:
-        os.makedirs(path)
-    except OSError as e:
-        if e.errno == errno.EEXIST:
-            pass
+def tokenize_with_truncation(input, tokenizer, truncated_size, padding_idx, t=False):
+    """
+    Use Right Truncation
+    input: a string of sequence 'a list of tokens'
+    """
+    input = tokenizer.tokenize(input) # a string of sequence ['a', 'list', 'of', 'tokens']
+
+    if len(input) > truncated_size - 2:
+        input = input[:(truncated_size-2)]
+
+    input = ['[CLS]'] + input + ['[SEP]']
+
+    input_mask = [1] * len(input)
+    input_ids = tokenizer.convert_tokens_to_ids(input)
+
+    pad_len = truncated_size - len(input_mask)
+    if pad_len > 0:
+        input_mask += [0] * pad_len
+        input_ids += [padding_idx] * pad_len
+
+    input_type_ids = [0] * truncated_size
+
+    if t:
+        input_ids = torch.LongTensor(input_ids)
+        input_mask = torch.LongTensor(input_mask)
+        input_type_ids = torch.LongTensor(input_type_ids)
+
+    return {'input_ids': input_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids}
+
+
+def extend_vocab(input_token_seq, output_token_seq, vocab_size, tokenizer):
+    """
+    input: ['I', 'missisipi -> [UNK]', 'what'] -> 
+    output: ['She', 'is', 'gooood -> [UNK]'] -> 
+    """
+    input_ids = []
+    oov = []
+    for token in input_token_seq:
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        if token_id == cfg['UNK_idx']:
+            if token not in oov:
+                oov.append(token)
+            input_ids.append(vocab_size + oov.index(token))
         else:
-            raise
-    return
+            input_ids.append(token_id)
+
+    output_ids = []
+    for token in output_token_seq:
+        token_id = tokenizer.convert_tokens_to_ids(token)
+        if token_id == cfg['UNK_idx']:
+            if token in oov:
+                output_ids.append(vocab_size + oov.index(token))
+            else:
+                output_ids.append(cfg['UNK_idx'])
+        else:
+            output_ids.append(token_id)
+
+    return input_ids, output_ids, oov
 
 
-class TextInstance(object):
-    def __init__(self, unique_id, text_a, text_b):
-        self.unique_id = unique_id
-        self.text_a = text_a
-        self.text_b = text_b
-
-class TextFeatures(object):
-    """A single set of features of data."""
-    def __init__(self, unique_id, tokens, input_ids, input_mask, input_type_ids):
-        self.unique_id = unique_id
-        self.tokens = tokens
-        self.input_ids = input_ids
-        self.input_mask = input_mask
-        self.input_type_ids = input_type_ids
-
-def abst2stns(abstract):
-  cur = 0
-  sents = []
-  while True:
-    try:
-      start_p = abstract.index(cfg['SENTENCE_START'], cur)
-      end_p = abstract.index(cfg['SENTENCE_END'], start_p + 1)
-      cur = end_p + len(cfg['SENTENCE_END'])
-      sents.append(abstract[start_p+len(cfg['SENTENCE_START']):end_p])
-    except ValueError as e: # no more sentences
-      return sents
 
 
-def save(input, path, mode='torch'): # save data
-    dirname = os.path.dirname(path)
-    makedir_exist_ok(dirname)
-    if mode == 'torch':
-        torch.save(input, path)
-    elif mode == 'np':
-        np.save(path, input, allow_pickle=True)
-    elif mode == 'pickle':
-        pickle.dump(input, open(path, 'wb'))
-    else:
-        raise ValueError('Not valid save mode')
-    return
+    
+
+    
 
 
-def load(path, mode='torch'): # load data
-    if mode == 'torch':
-        return torch.load(path, map_location=lambda storage, loc: storage)
-    elif mode == 'np':
-        return np.load(path, allow_pickle=True)
-    elif mode == 'pickle':
-        return pickle.load(open(path, 'rb'))
-    else:
-        raise ValueError('Not valid save mode')
-    return
+
+
+
+
+

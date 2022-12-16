@@ -99,37 +99,3 @@ def _get_attn_subsequent_mask(size):
     else:
         return subsequent_mask
 
-def text_input2bert_input(example, bert_tokenizer, seq_length=cfg['max_seq_length']):
-    tokens_a = bert_tokenizer.tokenize(example.text_a)
-    tokens_b = None
-    # Account for [CLS] and [SEP] with "- 2"
-    if len(tokens_a) > seq_length - 2:
-        tokens_a = tokens_a[0:(seq_length - 2)]
-
-    tokens = [] # equals raw text tokens 
-    input_type_ids = [] # equals segments_ids
-    tokens.append("[CLS]")
-    input_type_ids.append(0)
-    for token in tokens_a:
-        tokens.append(token)
-        input_type_ids.append(0)
-    tokens.append("[SEP]")
-    input_type_ids.append(0)
-
-    input_ids = bert_tokenizer.convert_tokens_to_ids(tokens) # WordPiece embedding rep
-
-    # The mask has 1 for real tokens and 0 for padding tokens. Only real
-    # tokens are attended to.
-    input_mask = [1] * len(input_ids)
-
-    # Zero-pad up to the sequence length.
-    while len(input_ids) < seq_length:
-        input_ids.append(0)
-        input_mask.append(0)
-        input_type_ids.append(0)
-
-    input_ids_batch = torch.tensor(input_ids, dtype=torch.long)
-    input_mask_batch = torch.tensor(input_mask, dtype=torch.long)
-    example_index_batch = torch.zeros(input_ids_batch.size(), dtype=torch.long)
-
-    return input_ids_batch, input_mask_batch, example_index_batch

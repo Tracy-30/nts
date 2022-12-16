@@ -5,18 +5,34 @@ from pytorch_pretrained_bert.modeling import BertModel
 import torch
 import numpy as np
 from config import cfg
-from dataset.cnn_dm import CNNDM
+from dataset.cnn_dm import CNNDM, CNNDM_SMALL
+from dataset.tldr_news import TLDR_NEWS
 
 def fetch_dataset(data_name):
     dataset = {}
     print('fetching data {}...'.format(data_name))
-    root = '/Users/tracy/Desktop/data/{}'.format(data_name)
+    root = '{}/{}'.format(cfg['data_path'],data_name)
 
     if data_name in ['CNN_DAILYMAILS']:
-        tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
-
+        tokenizer = 'bert-base-uncased'
         dataset['train'] = eval('{}(root=root, split=\'train\', tokenizer=tokenizer)'.format('CNNDM'))
         dataset['test'] = eval('{}(root=root, split=\'test\', tokenizer=tokenizer)'.format('CNNDM'))
+
+    elif data_name in ['CNN_DAILYMAILS_SMALL']:
+        tokenizer = 'bert-base-uncased'
+        dataset['train'] = eval('{}(root=root, split=\'train\', tokenizer=tokenizer)'.format('CNNDM_SMALL'))
+        dataset['test'] = eval('{}(root=root, split=\'test\', tokenizer=tokenizer)'.format('CNNDM_SMALL'))
+
+    elif data_name in ['TLDR_NEWS']:
+        tokenizer = 'bert-base-uncased'
+        dataset['train'] = eval('{}(root=root, split=\'train\', tokenizer=tokenizer)'.format('TLDR_NEWS'))
+        dataset['test'] = eval('{}(root=root, split=\'test\', tokenizer=tokenizer)'.format('TLDR_NEWS'))
+
+    elif data_name in ['BBC_NEWS']:
+        tokenizer = 'bert-base-uncased'
+        dataset['train'] = eval('{}(root=root, split=\'train\', tokenizer=tokenizer)'.format('BBC_NEWS'))
+        dataset['test'] = eval('{}(root=root, split=\'test\', tokenizer=tokenizer)'.format('BBC_NEWS'))
+
     else:
         raise ValueError('Not valid dataset name')
 
@@ -28,31 +44,17 @@ def input_collate(batch):
     for b in batch:
         for key in b:
             output[key].append(b[key])
-    
-    ipt_feat = output['ipt_feat']
-    ipt_ids_batch = torch.tensor([f.input_ids for f in ipt_feat], dtype=torch.long)
-    ipt_mask_batch = torch.tensor([f.input_mask for f in ipt_feat], dtype=torch.long)
-    artic_idx_batch = torch.zeros(ipt_ids_batch.size(), dtype=torch.long)
+    for key in output:
+        if key != 'target_text':
+            output[key] = torch.stack(output[key])
+    return output 
 
-    tgt_feat = output['tgt_feat']
-    tgt_ids_batch = torch.tensor([f.input_ids for f in tgt_feat], dtype=torch.long)
-    tgt_mask_batch = torch.tensor([f.input_mask for f in tgt_feat], dtype=torch.long)
-    summ_idx_batch = torch.zeros(tgt_ids_batch.size(), dtype=torch.long)
-
-    target_batch = tgt_ids_batch.transpose(0, 1)
-
-    data = {'ipt_ids':ipt_ids_batch, 'ipt_mask':ipt_mask_batch, 'ipt_artic_idx':artic_idx_batch,
-            'tgt_batch':target_batch, 'tgt_mask':tgt_mask_batch, 'tgt_summ_idx':summ_idx_batch,
-            'tgt_txt':output['tgt_txt'] }
-    
-    return data 
-
-def make_data_loader(dataset, sampler=None):
+def make_data_loader(dataset, tag, sampler=None):
     data_loader = {}
     for split in dataset:
-        _batch_size = cfg['batch_size'][split] 
-        _shuffle = cfg['shuffle'][split]
-
+        _batch_size = cfg[tag]['batch_size'][split] 
+        _shuffle = cfg[tag]['shuffle'][split]
+        
         if sampler is None:
             data_loader[split] = DataLoader(dataset=dataset[split], batch_size=_batch_size, shuffle=_shuffle,
                                         pin_memory=True, num_workers=cfg['num_workers'], collate_fn=input_collate,
@@ -66,27 +68,35 @@ def make_data_loader(dataset, sampler=None):
 
 if __name__ == "__main__":
     dataset = fetch_dataset(cfg['data_name'])
-    data_loader = make_data_loader(dataset)
+    data_loader = make_data_loader(dataset,'two_stage_summarizer')
+
+    print(len(data_loader['train']), len(data_loader['test']))
     
+
     for batch, input in enumerate(data_loader['train']):
         print(input.keys())
 
-        print("data_piece_1:     ")
-        print(input['ipt_ids'][0], input['ipt_ids'].shape)
-    #     # print(input['ipt_mask'][0])
-    #     # print(input['ipt_artic_idx'][0])
-    #     # print(input['tgt_batch'][0])
-    #     # print(input['tgt_mask'][0])
-    #     # print(input['tgt_summ_idx'][0])
-    #     # print(input['tgt_txt'][0])
+        print(len(input['input_ids']))
 
+        print(input['input_ids'][0])
+        print(input['input_mask'][0])
+        print(input['input_type_ids'][0])
+
+        print(input['target_ids'][0])
+        print(input['target_mask'][0])
+        print(input['target_type_ids'][0])
+
+        print(input['target_text'])
+
+
+        # print("data_piece_1:     ")
+        # print(input['input_ids'][0])
+        # print(tokenizer.convert_ids_to_tokens(input['input_ids'][0].tolist()))
+        # # print(input['ipt_mask'][0])
+        # # print(input['ipt_type_ids'][0])
+        # print(input['target_ids'][0])
+        # # print(input['tgt_mask'][0])
+        # # print(input['tgt_type_ids'][0])
+        # print(input['target_text'][0])
         
-    #     # print("data_piece_2:     ")
-    #     # print(input['ipt_ids'][1])
-    #     # print(input['ipt_mask'][1])
-    #     # print(input['ipt_artic_idx'][1])
-    #     # print(input['tgt_batch'][1])
-    #     # print(input['tgt_mask'][1])
-    #     # print(input['tgt_summ_idx'][1])
-    #     # print(input['tgt_txt'][1])
         break

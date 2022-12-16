@@ -1,17 +1,19 @@
-from torch.utils.data import Dataset
-from dataset.utils import TextInstance, TextFeatures, abst2stns, check_exists, save, load
-from tensorflow.core.example import example_pb2
+import os
+import csv
+import torch
+from numpy.random import default_rng
+
 
 from config import cfg
-import os
-import glob
-import struct
-from tqdm import tqdm
-
+from torch.utils.data import Dataset
+from pytorch_pretrained_bert import BertTokenizer
+from utils import check_exists, makedir_exist_ok, save, load
+from dataset.utils import tokenize_with_truncation
 
 '''CNN/Daily Mail Dataset'''
 class CNNDM(Dataset):
-    def __init__(self, root, split, tokenizer):
+    def __init__(self, root, split, tokenizer="bert-base-uncased"):
+        super(CNNDM, self).__init__()
         '''
         root: root PATH
         split: train/test
@@ -20,32 +22,30 @@ class CNNDM(Dataset):
         self.root = os.path.expanduser(root)
         self.split = split
 
+        self.bert_tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
+
         if not check_exists(self.processed_folder):
             self.process()
 
-        self.dataset = load(os.path.join(self.processed_folder, '{}.pickle'.format(self.split)), mode='pickle')
-        self.total_num = len(self.dataset[0])
-
-        self.bert_tokenizer = tokenizer
+        self.dataset = load(os.path.join(self.processed_folder, '{}.pt'.format(self.split)), mode='torch')
+        self.tgt_txt = load(os.path.join(self.processed_folder, '{}_tgt.pickle'.format(self.split)), mode='pickle')
 
     def __getitem__(self, idx):
-        bert_tokenized_feat = {}
+        bert_tokenized_feat = { 'input_ids':self.dataset[0][idx], 
+                                'input_mask':self.dataset[1][idx], 
+                                'input_type_ids':self.dataset[2][idx],
+                                'target_ids':self.dataset[3][idx], 
+                                'target_mask':self.dataset[4][idx], 
+                                'target_type_ids':self.dataset[5][idx]}
+        bert_tokenized_feat['target_text'] = self.tgt_txt[idx]
 
-        bert_tokenized_feat['ipt_feat']  = self.preprocess(self.dataset[0][idx], is_bert=True) # BERT article features  
-        bert_tokenized_feat['tgt_feat']  = self.preprocess(self.dataset[1][idx], is_bert=True) # BERT summary features
-
-        bert_tokenized_feat['tgt_txt']   = self.dataset[1][idx].text_a
-
-        # if config.pointer_gen:
-        #     # TODO: NEED TO UPDATE 
-        #     item["input_ext_vocab_batch"], item["article_oovs"] = self.process_input(item["input_txt"])
-        #     item["target_ext_vocab_batch"] = self.process_target(item["target_txt"], item["article_oovs"])
-        #     item['target_ptr'], item['target_gate'] = self.create_ptr_and_gate(item["input_batch"],item["target_batch"],item["input_txt"],item["target_txt"])
+        # input should have length 512
+        # output should have length 100
 
         return bert_tokenized_feat
 
     def __len__(self):
-        return self.total_num
+        return len(self.dataset[0])
 
     @property
     def processed_folder(self):
@@ -56,101 +56,144 @@ class CNNDM(Dataset):
         return os.path.join(self.root, 'raw')
 
     def process(self):
-        train_artic, test_artic, val_artic, train_summ, test_summ, val_summ = self.make_data()
+        makedir_exist_ok(self.processed_folder)
+        train_data = self.make_data(split='train')
+        test_data = self.make_data(split='test')
 
-        save((train_artic, train_summ), os.path.join(self.processed_folder, 'train.pickle'), mode='pickle')
-        save((test_artic, test_summ), os.path.join(self.processed_folder, 'test.pickle'), mode='pickle')
-        save((val_artic, val_summ), os.path.join(self.processed_folder, 'val.pickle'), mode='pickle')
+        save(train_data[1:7], os.path.join(self.processed_folder, 'train.pt'), mode='torch')
+        save(test_data[1:7], os.path.join(self.processed_folder, 'test.pt'), mode='torch')
+
+        save(train_data[0], os.path.join(self.processed_folder, 'train_tgt.pickle'), mode='pickle')
+        save(test_data[0], os.path.join(self.processed_folder, 'test_tgt.pickle'), mode='pickle')
 
         return
 
+    def make_data(self, split):
+        input_ids, input_mask, input_type_ids = [], [], []
+        target_ids, target_mask, target_type_ids = [], [], []
 
-    def make_data(self):
-        train_artic, test_artic, val_artic = [], [], []
-        train_summ, test_summ, val_summ = [], [], []
+        target_text = []
+        with open(self.raw_folder + f'/{split}.csv') as csv_file:
+            csv_reader = csv.reader(csv_file, delimiter=',')
+            c = 0
+            for row in csv_reader:
+                if c >= 1: # avoid column name
+                    target_text.append(row[1])
 
-        unique_id = 0
+                    input_data = tokenize_with_truncation(input=row[0],tokenizer=self.bert_tokenizer,
+                            truncated_size=cfg[cfg['data_name']]['encoder_max_length'],padding_idx=cfg['PAD_idx'],t=True)
 
-        while True:
-            filelist = glob.glob(f'{self.raw_folder}/*') # get the list of datafiles
-            assert filelist, ('Error: Empty filelist at %s' % f'{self.raw_folder}/*') # check filelist isn't empty
-            filelist = sorted(filelist)
-            for f in tqdm(filelist):
-                split = 'train' if 'train' in f else 'val' if 'val' in f else 'test'
-                reader = open(f, 'rb')
-                while True:
-                    len_bytes = reader.read(8)
-                    if not len_bytes: break # finished reading this file
-                    str_len = struct.unpack('q', len_bytes)[0]
-                    example_str = struct.unpack('%ds' % str_len, reader.read(str_len))[0]
-                    e = example_pb2.Example.FromString(example_str) 
-                    
-                    article_text = e.features.feature['article'].bytes_list.value[0]
-                    abstract_text = e.features.feature['abstract'].bytes_list.value[0]
+                    target_data = tokenize_with_truncation(input=row[1],tokenizer=self.bert_tokenizer,
+                            truncated_size=cfg[cfg['data_name']]['decoder_max_length'],padding_idx=cfg['PAD_idx'],t=True)
 
-                    abstract_text = ' '.join([sent.strip() for sent in abst2stns(abstract_text.decode())])
-                    
-                    artic_inst = TextInstance(unique_id=unique_id,
-                                     text_a=article_text.decode().strip(),
-                                     text_b=None)
-                    summ_inst =  TextInstance(unique_id=unique_id,
-                                     text_a=abstract_text,
-                                     text_b=None)
+                    input_ids.append(input_data['input_ids'])
+                    input_mask.append(input_data['input_mask'])
+                    input_type_ids.append(input_data['input_type_ids'])
 
-                    if split == 'train':
-                        train_artic.append(artic_inst)
-                        train_summ.append(summ_inst)
-                    elif split == 'test':
-                        test_artic.append(artic_inst)
-                        test_summ.append(summ_inst)
-                    elif split == 'val':
-                        val_artic.append(artic_inst)
-                        val_summ.append(summ_inst)
-
-                    unique_id += 1
-            
-            return train_artic, test_artic, val_artic, train_summ, test_summ, val_summ
+                    target_ids.append(target_data['input_ids'])
+                    target_mask.append(target_data['input_mask'])
+                    target_type_ids.append(target_data['input_type_ids'])
+                c+=1
+        return target_text, torch.stack(input_ids), torch.stack(input_mask), torch.stack(input_type_ids), torch.stack(target_ids), \
+            torch.stack(target_mask), torch.stack(target_type_ids)
 
 
-    def preprocess(self, text_instance, seq_length=cfg['max_seq_length'], is_bert=False):
-        tokens_a = self.bert_tokenizer.tokenize(text_instance.text_a)
-        tokens_b = None
-        # Account for [CLS] and [SEP] with "- 2"
-        if len(tokens_a) > seq_length - 2:
-            tokens_a = tokens_a[0:(seq_length - 2)]
+'''A Small Version CNN/Daily Mail Dataset'''
+class CNNDM_SMALL(Dataset):
+    def __init__(self, root, split, tokenizer="bert-base-uncased", train_size=10000, test_size=100):
+        '''
+        root: root PATH
+        split: train/test
+        tokenizer: BERT tokenizer
+        '''
+        self.root = os.path.expanduser(root)
+        self.split = split
 
-        tokens = [] # equals raw text tokens 
-        input_type_ids = [] # equals segments_ids
-        tokens.append("[CLS]")
-        input_type_ids.append(0)
-        for token in tokens_a:
-            tokens.append(token)
-            input_type_ids.append(0)
-        tokens.append("[SEP]")
-        input_type_ids.append(0)
+        self.train_size = train_size
+        self.test_size = test_size
 
-        input_ids = self.bert_tokenizer.convert_tokens_to_ids(tokens) # WordPiece embedding rep
+        self.bert_tokenizer = BertTokenizer.from_pretrained(tokenizer)
 
-        if is_bert:
-            # The mask has 1 for real tokens and 0 for padding tokens. Only real
-            # tokens are attended to.
-            input_mask = [1] * len(input_ids)
+        if not check_exists(self.processed_folder):
+            self.process()
 
-            # Zero-pad up to the sequence length.
-            while len(input_ids) < seq_length:
-                input_ids.append(0)
-                input_mask.append(0)
-                input_type_ids.append(0)
+        self.dataset = load(os.path.join(self.processed_folder, '{}.pt'.format(self.split)), mode='torch')
+        self.tgt_txt = load(os.path.join(self.processed_folder, '{}_tgt.pickle'.format(self.split)), mode='pickle')
 
-            return TextFeatures(
-                    unique_id=text_instance.unique_id,
-                    tokens=tokens, # raw text tokens
-                    input_ids=input_ids, # WordPiece tokens
-                    input_mask=input_mask, # mask tokens for later
-                    input_type_ids=input_type_ids) # segments_ids
-        else:
-            while len(input_ids) < seq_length:
-                input_ids.append(0)
-            return input_ids # WordPiece represetnation
+
+    def __getitem__(self, idx):
+        bert_tokenized_feat = { 'input_ids':self.dataset[0][idx], 
+                                'input_mask':self.dataset[1][idx], 
+                                'input_type_ids':self.dataset[2][idx],
+                                'target_ids':self.dataset[3][idx], 
+                                'target_mask':self.dataset[4][idx], 
+                                'target_type_ids':self.dataset[5][idx]}
+        bert_tokenized_feat['target_text'] = self.tgt_txt[idx]
+
+        # input should have length 512
+        # output should have length 100
+
+        return bert_tokenized_feat
+
+    def __len__(self):
+        return len(self.dataset[0])
+
+    @property
+    def processed_folder(self):
+        return os.path.join(self.root, 'processed')
+
+    @property
+    def raw_folder(self):
+        return os.path.join(self.root, 'raw')
+
+    def process(self):
+        makedir_exist_ok(self.processed_folder)
+        train_data = self.make_data(split='train')
+        test_data = self.make_data(split='test')
+
+        save(train_data[1:7], os.path.join(self.processed_folder, 'train.pt'), mode='torch')
+        save(test_data[1:7], os.path.join(self.processed_folder, 'test.pt'), mode='torch')
+
+        save(train_data[0], os.path.join(self.processed_folder, 'train_tgt.pickle'), mode='pickle')
+        save(test_data[0], os.path.join(self.processed_folder, 'test_tgt.pickle'), mode='pickle')
+
+        return
+
+    def make_data(self, split):
+        input_ids, input_mask, input_type_ids = [], [], []
+        target_ids, target_mask, target_type_ids = [], [], []
+
+        target_text = []
+
+        total_sample = 287227 if split=='train' else 11490
+        max_sample = self.train_size if split=='train' else self.test_size
+
+        rng = default_rng()
+        sample_idx = rng.choice(total_sample, size=max_sample, replace=False)
+
+        with open(self.raw_folder + f'/{split}.csv') as csv_file:
+            csv_reader = csv.reader(csv_file, delimiter=',')
+            c = 0
+            for row in csv_reader:
+                if c >= 1 and c in sample_idx: # avoid column name
+                    target_text.append(row[1])
+
+                    input_data = tokenize_with_truncation(input=row[0],tokenizer=self.bert_tokenizer,
+                            truncated_size=cfg[cfg['data_name']]['encoder_max_length'],padding_idx=cfg['PAD_idx'],t=True)
+
+                    target_data = tokenize_with_truncation(input=row[1],tokenizer=self.bert_tokenizer,
+                            truncated_size=cfg[cfg['data_name']]['decoder_max_length'],padding_idx=cfg['PAD_idx'],t=True)
+
+                    input_ids.append(input_data['input_ids'])
+                    input_mask.append(input_data['input_mask'])
+                    input_type_ids.append(input_data['input_type_ids'])
+
+                    target_ids.append(target_data['input_ids'])
+                    target_mask.append(target_data['input_mask'])
+                    target_type_ids.append(target_data['input_type_ids'])
+                c += 1
+
+        return target_text, torch.stack(input_ids), torch.stack(input_mask), torch.stack(input_type_ids), torch.stack(target_ids), \
+            torch.stack(target_mask), torch.stack(target_type_ids)
 
     

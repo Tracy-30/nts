@@ -2,21 +2,25 @@ import numpy as np
 from tqdm import tqdm
 from models.beam_omt import Translator
 from rouge import Rouge
+from config import cfg
 
-def evaluate(model, data, model_name='trs', mode='valid', verbose=True):
+from dataset.utils import to_device
+
+def evaluate(model, data, model_name='trs', mode='valid', verbose=False):
     hyp_g, ref, r1, r2, rl, r_avg = [],[],[],[],[],[]
     t = Translator(model)
     rouge = Rouge()
 
     l, loss = [], None
-    pbar = tqdm(enumerate(data),total=len(data))
+    pbar = tqdm(enumerate(data), total=len(data))
     for j, batch in pbar:
+        if cfg['device'] == 'cuda': 
+            batch = to_device(batch, cfg['device'])
         
-        if mode != "test":
-            loss = model.train_one_batch(batch, train=False)
-            l.append(loss.item())
+        loss = model.train_one_batch(batch, train=False)
+        l.append(loss.item())
             
-        if( (j <= 1 and mode != "test") or mode =="test"): 
+        if j <= 1: 
             if mode != 'test':
                 sent_g = model.decoder_greedy(batch) # 1-decoder generation. for testing
             else:
@@ -25,8 +29,8 @@ def evaluate(model, data, model_name='trs', mode='valid', verbose=True):
 
             for i, sent in enumerate(sent_g):
                 hyp_g.append(sent) 
-                ref.append(batch["target_txt"][i])
-                rouges = rouge.get_scores(sent,batch["target_txt"][i])[0] # (hyp, ref)
+                ref.append(batch["tgt_txt"][i])
+                rouges = rouge.get_scores(sent,batch["tgt_txt"][i])[0] # (hyp, ref)
                 r1_val,r2_val,rl_val = rouges['rouge-1']["f"], rouges['rouge-2']["f"], rouges['rouge-l']["f"]
                 r1.append(r1_val)
                 r2.append(r2_val)

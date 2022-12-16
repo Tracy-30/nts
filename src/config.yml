@@ -1,35 +1,192 @@
 # data
-data_name: CNN_DAILYMAILS
-SENTENCE_START: <s>
-SENTENCE_END: </s>
-max_seq_length: 100
+data_name: CNN_DAILYMAILS_SMALL
+data_path: /hpc/group/tarokhlab/yg172/data
+
+CNN_DAILYMAILS:
+  encoder_max_length: 512  # avg 691
+  decoder_max_length: 100  # avg 51
+  train_samples: 287227
+  test_samples: 11490
+
+CNN_DAILYMAILS_SMALL:
+  encoder_max_length: 512
+  decoder_max_length: 100
+  train_samples: 10000
+  test_samples: 100
+
+TLDR_NEWS:
+  encoder_max_length: 80  # avg 79
+  decoder_max_length: 40 # avg 10
+  train_samples: 7000 # 7138 in total
+  test_samples: 200  # 794 in total
 
 vocab_size: 30522
-
-UNK_idx: 0
-PAD_idx: 1
-EOS_idx: 2
-SOS_idx: 3
+UNK_idx: 100
+PAD_idx: 0
+CLS_idx: 101
+SOS_idx: 101
+SEP_idx: 102
+EOS_idx: 102
+MASK_idx: 103
 
 # model
-model_name: bert
-pointer_gen: False
-max_enc_steps: 400
-max_dec_step: 100
-hidden_dim: 64
-is_coverage: False
-beam_size: 3
+model_name: two_stage_summarizer
+search_algorithm: greedy
+save_path: /scratch/yg172/output
 
-batch_size:
-  train: 40
-  test: 40
-shuffle:
-  train: True
-  test: False
-lr: 1.e-3
-epochs: 30
+one_stage_summarizer:
+  copy_mech: False
+  beam_size: 3
+  label_smooth: 0
+  dropout_rate: 0
+  param:
+    hidden_size: 128
+    num_layers: 4
+    num_attn_heads: 12
+    total_key_depth: 48
+    total_value_depth: 48
+    filter_size: 64
+    two_stage: False
+  optimizer_name: Adam
+  lr: 3.e-4
+  weight_decay: 0
+  betas: [0.9,0.999]
+  eps: 1.e-9
 
-device: cpu
-num_workers: 0
+  scheduler_name: ReduceLROnPlateau
+  factor: 0.85
+  patience: 10
+  threshold: 1.0e-4
+  min_lr: 1.0e-6
+
+  warm_up: True
+  num_warmup_partial: 0.1
+
+  num_epochs: 40
+  batch_size:
+    train: 32
+    test: 1
+  shuffle:
+    train: True
+    test: False
+
+one_stage_summarizer_copy:
+  copy_mech: True
+  beam_size: 3
+  label_smooth: 0
+  dropout_rate: 0
+  param:
+    hidden_size: 128
+    num_layers: 4
+    num_attn_heads: 12
+    total_key_depth: 48
+    total_value_depth: 48
+    filter_size: 64
+    two_stage: False
+  optimizer_name: Adam
+  lr: 3.e-4
+  weight_decay: 0
+  betas: [0.9,0.999]
+  eps: 1.e-9
+
+  scheduler_name: ReduceLROnPlateau
+  factor: 0.85
+  patience: 2
+  threshold: 1.0e-4
+  min_lr: 1.0e-6
+
+  warm_up: True
+  num_warmup_partial: 0.1
+
+  num_epochs: 40
+  batch_size:
+    train: 32
+    test: 1
+  shuffle:
+    train: True
+    test: False
+
+two_stage_summarizer:
+  copy_mech: False
+  beam_size: 3
+  label_smooth: 0
+  dropout_rate: 0
+  param:
+    hidden_size: 128
+    num_layers: 4
+    num_attn_heads: 12
+    total_key_depth: 48
+    total_value_depth: 48
+    filter_size: 64
+    two_stage: True
+  optimizer_name: Adam
+  lr: 3.e-4
+  weight_decay: 0
+  betas: [0.9,0.999]
+  eps: 1.e-9
+
+  scheduler_name: ReduceLROnPlateau
+  factor: 0.85
+  patience: 10
+  threshold: 1.0e-4
+  min_lr: 1.0e-6
+
+  warm_up: True
+  num_warmup_partial: 0.05
+
+  num_epochs: 20
+  batch_size:
+    train: 4
+    test: 1
+  shuffle:
+    train: True
+    test: False
+
+two_stage_summarizer_copy:
+  copy_mech: True
+  beam_size: 3
+  label_smooth: 0
+  dropout_rate: 0
+  param:
+    hidden_size: 128
+    num_layers: 4
+    num_attn_heads: 12
+    total_key_depth: 48
+    total_value_depth: 48
+    filter_size: 64
+    two_stage: True
+  optimizer_name: Adam 
+  lr: 3.e-4
+  weight_decay: 0
+  betas: [0.9,0.999]
+  eps: 1.e-9
+
+  scheduler_name: ReduceLROnPlateau
+  factor: 0.85
+  patience: 10
+  threshold: 1.0e-4
+  min_lr: 1.0e-6
+
+  warm_up: False
+  num_warmup_partial: 0.05
+
+  num_epochs: 10
+  batch_size:
+    train: 4
+    test: 1
+  shuffle:
+    train: True
+    test: False
+
+pivot_metric: rouge_avg
+
+# Experiment
+device: cuda
+cuda_device: 2
 seed: 0
-save_path: save/
+num_workers: 0
+world_size: 1
+num_experiments: 1
+resume_mode: 0
+info_interval: 10
+eval_interval: 500

@@ -74,8 +74,6 @@ class EncoderLayer(nn.Module):
         return y
 
 
-
-
 class DecoderLayer(nn.Module):
     """
     Represents one Decoder layer of the Transformer Decoder

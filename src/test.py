@@ -15,10 +15,38 @@
 #     print(cnn_dm_data.__getitem__(0))
 
 if __name__ == "__main__":
-    from models.summarizer import Summarizer
-    model = Summarizer(is_draft=True, emb_dim=64, hidden_dim=32, hop=12, heads=4, depth=4, filter=4)
-    # from models.decoders import Decoder, Generator
+    from models.summarizer import Two_Stage_Summarizer
+    from data import fetch_dataset, make_data_loader
+    from config import cfg
+    from metrics.metrics import ROUGE
+    from utils import to_device
 
-    # decoder = Decoder(embedding_size=32, hidden_size=32, num_layers=4, num_heads=4, total_key_depth=8, 
-                                # total_value_depth=8,filter_size=8,)
+    dataset = fetch_dataset(cfg['data_name'])
+    data_loader = make_data_loader(dataset,cfg['model_name'])
+
+    param = cfg[cfg['model_name']]['param']
+    model = Two_Stage_Summarizer(**param)
+
+    param['two_stage'] = True
+    model_refine = Two_Stage_Summarizer(**param)
+
+    for i, input in enumerate(data_loader['test']):
+        input = to_device(input, cfg['device'])
+        pred_sentence1 = model.test_one_batch(input, method=cfg['search_algorithm'])
+        pred_sentence2 = model_refine.test_one_batch(input, method=cfg['search_algorithm'])
+
+        print(pred_sentence1)
+
+        print(pred_sentence2)
+
+        
+        print(input['tgt_txt'])
+
+
+        break
+
+    
+
+    
+    
 
