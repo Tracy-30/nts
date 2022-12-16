@@ -1,23 +1,12 @@
-### MOSTO OF IT TAKEN FROM https://github.com/kolloldas/torchnlp
-## MINOR CHANGES
+### Most Layers in this page is heavily borrowed from https://github.com/kolloldas/torchnlp ###
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.autograd import Variable
-import torch.nn.init as I
 import numpy as np
-import math
-# from utils.beam_ptr import BeamSearch
-import pprint
-from tqdm import tqdm
-pp = pprint.PrettyPrinter(indent=1)
-from pytorch_pretrained_bert.tokenization import BertTokenizer
-# from rouge import Rouge
 
 class EncoderLayer(nn.Module):
     """
-    Represents one Encoder layer of the Transformer Encoder
-    Refer Fig. 1 in https://arxiv.org/pdf/1706.03762.pdf
+    Represents one Encoder layer of the Transformer Encoder in https://arxiv.org/pdf/1706.03762.pdf
     NOTE: The layer normalization step has been moved to the input as per latest version of T2T
     """
     def __init__(self, hidden_size, total_key_depth, total_value_depth, filter_size, num_heads,
@@ -27,15 +16,14 @@ class EncoderLayer(nn.Module):
             hidden_size: Hidden size
             total_key_depth: Size of last dimension of keys. Must be divisible by num_head
             total_value_depth: Size of last dimension of values. Must be divisible by num_head
-            output_depth: Size last dimension of the final output
             filter_size: Hidden size of the middle layer in FFN
             num_heads: Number of attention heads
             bias_mask: Masking tensor to prevent connections to future elements
+
             layer_dropout: Dropout for this layer
-            attention_dropout: Dropout probability after attention (Should be non-zero only during training)
-            relu_dropout: Dropout probability after relu in FFN (Should be non-zero only during training)
+            attention_dropout: Dropout after attention
+            relu_dropout: Dropout after relu in FFN
         """
-        
         super(EncoderLayer, self).__init__()
         
         self.multi_head_attention = MultiHeadAttention(hidden_size, total_key_depth, total_value_depth, 
@@ -47,7 +35,6 @@ class EncoderLayer(nn.Module):
         self.dropout = nn.Dropout(layer_dropout)
         self.layer_norm_mha = LayerNorm(hidden_size)
         self.layer_norm_ffn = LayerNorm(hidden_size)
-        # self.layer_norm_end = LayerNorm(hidden_size)
         
     def forward(self, inputs, mask=None):
         x = inputs
@@ -70,15 +57,12 @@ class EncoderLayer(nn.Module):
         # Dropout and residual
         y = self.dropout(x + y)
         
-        # y = self.layer_norm_end(y)
         return y
 
 
 class DecoderLayer(nn.Module):
     """
-    Represents one Decoder layer of the Transformer Decoder
-    Refer Fig. 1 in https://arxiv.org/pdf/1706.03762.pdf
-    NOTE: The layer normalization step has been moved to the input as per latest version of T2T
+    Represents one Decoder layer of the Transformer Decoder in https://arxiv.org/pdf/1706.03762.pdf
     """
     def __init__(self, hidden_size, total_key_depth, total_value_depth, filter_size, num_heads,
                  bias_mask, layer_dropout=0.0, attention_dropout=0.0, relu_dropout=0.0):
@@ -91,9 +75,10 @@ class DecoderLayer(nn.Module):
             filter_size: Hidden size of the middle layer in FFN
             num_heads: Number of attention heads
             bias_mask: Masking tensor to prevent connections to future elements
+
             layer_dropout: Dropout for this layer
-            attention_dropout: Dropout probability after attention (Should be non-zero only during training)
-            relu_dropout: Dropout probability after relu in FFN (Should be non-zero only during training)
+            attention_dropout: Dropout after attention
+            relu_dropout: Dropout after relu in FFN
         """
         
         super(DecoderLayer, self).__init__()
@@ -112,8 +97,6 @@ class DecoderLayer(nn.Module):
         self.layer_norm_mha_dec = LayerNorm(hidden_size)
         self.layer_norm_mha_enc = LayerNorm(hidden_size)
         self.layer_norm_ffn = LayerNorm(hidden_size)
-        # self.layer_norm_end = LayerNorm(hidden_size)
-
         
     def forward(self, inputs):
         """
@@ -125,7 +108,6 @@ class DecoderLayer(nn.Module):
         x, encoder_outputs, attention_weight, mask = inputs
         mask_src, dec_mask = mask
 
-        
         # Layer Normalization before decoder self attention
         x_norm = self.layer_norm_mha_dec(x)
                 
@@ -137,8 +119,6 @@ class DecoderLayer(nn.Module):
 
         # Layer Normalization before encoder-decoder attention
         x_norm = self.layer_norm_mha_enc(x)
-
-        # encoder_outputs = torch.stack(encoder_outputs,dim=1)
 
         # Multi-head encoder-decoder attention
         y, attention_weight = self.multi_head_attention_enc_dec(x_norm, encoder_outputs, encoder_outputs, mask_src)
@@ -154,19 +134,12 @@ class DecoderLayer(nn.Module):
         
         # Dropout and residual after positionwise feed forward layer
         y = self.dropout(x + y)
-        
-        # y = self.layer_norm_end(y)
-        
-        # Return encoder outputs as well to work with nn.Sequential
-        
+                        
         return y, encoder_outputs, attention_weight, mask
-
-
 
 class MultiHeadAttention(nn.Module):
     """
-    Multi-head attention as per https://arxiv.org/pdf/1706.03762.pdf
-    Refer Figure 2
+    Multi-head attention as https://arxiv.org/pdf/1706.03762.pdf
     """
     def __init__(self, input_depth, total_key_depth, total_value_depth, output_depth, 
                  num_heads, bias_mask=None, dropout=0.0):
@@ -178,11 +151,10 @@ class MultiHeadAttention(nn.Module):
             output_depth: Size last dimension of the final output
             num_heads: Number of attention heads
             bias_mask: Masking tensor to prevent connections to future elements
-            dropout: Dropout probability (Should be non-zero only during training)
+
+            dropout: Dropout probability
         """
         super(MultiHeadAttention, self).__init__()
-        # Checks borrowed from 
-        # https://github.com/tensorflow/tensor2tensor/blob/master/tensor2tensor/layers/common_attention.py
         if total_key_depth % num_heads != 0:
             raise ValueError("Key depth (%d) must be divisible by the number of "
                              "attention heads (%d)." % (total_key_depth, num_heads))
@@ -229,11 +201,6 @@ class MultiHeadAttention(nn.Module):
         return x.permute(0, 2, 1, 3).contiguous().view(shape[0], shape[2], shape[3]*self.num_heads)
         
     def forward(self, queries, keys, values, mask):
-        # (self, x_norm, encoder_outputs, encoder_outputs, mask_src)
-        # print(type(queries))
-        # print(type(keys))
-        # print(type(values))
-
         # Do a linear for each component
         queries = self.query_linear(queries)
         keys = self.key_linear(keys)
@@ -254,21 +221,10 @@ class MultiHeadAttention(nn.Module):
             mask = mask.unsqueeze(1)  # [B, 1, 1, T_values]
             logits = logits.masked_fill(mask, -1e18)
 
-
-        # # Add bias to mask future values
-        # if self.bias_mask is not None:
-        #     logits += self.bias_mask[:, :, :logits.shape[-2], :logits.shape[-1]].type_as(logits.data)
-        
-        ## attention weights 
-        # if cfg['split_copy_head']:
-        #     attention_weights = logits[:,0] # get the attention from first head as copy distribution
-        # else:
         attention_weights = logits.sum(dim=1)/self.num_heads
-        
 
         # Convert to probabilites
         weights = nn.functional.softmax(logits, dim=-1)
-
 
         # Dropout
         weights = self.dropout(weights)
@@ -278,7 +234,6 @@ class MultiHeadAttention(nn.Module):
         
         # Merge heads
         contexts = self._merge_heads(contexts)
-        #contexts = torch.tanh(contexts)
         
         # Linear to get output
         outputs = self.output_linear(contexts)
@@ -287,7 +242,7 @@ class MultiHeadAttention(nn.Module):
 
 class Conv(nn.Module):
     """
-    Convenience class that does padding and convolution for inputs in the format
+    A Convenience class that does padding and convolution for inputs in the format
     [batch_size, sequence length, hidden size]
     """
     def __init__(self, input_size, output_size, kernel_size, pad_type):
@@ -356,10 +311,7 @@ class PositionwiseFeedForward(nn.Module):
 
         return x
 
-
 class LayerNorm(nn.Module):
-    # Borrowed from jekbradbury
-    # https://github.com/pytorch/pytorch/issues/1959
     def __init__(self, features, eps=1e-6):
         super(LayerNorm, self).__init__()
         self.gamma = nn.Parameter(torch.ones(features))
@@ -404,74 +356,12 @@ class SoftmaxOutputLayer(OutputLayer):
 
 def position_encoding(sentence_size, embedding_dim):
     encoding = np.ones((embedding_dim, sentence_size), dtype=np.float32)
+
     ls = sentence_size + 1
     le = embedding_dim + 1
+
     for i in range(1, le):
         for j in range(1, ls):
             encoding[i-1, j-1] = (i - (embedding_dim+1)/2) * (j - (sentence_size+1)/2)
     encoding = 1 + 4 * encoding / embedding_dim / sentence_size
-    # Make position encoding of time words identity to avoid modifying them
-    # encoding[:, -1] = 1.0
     return np.transpose(encoding)
-
-class LabelSmoothing(nn.Module):
-    "Implement label smoothing."
-    def __init__(self, size, padding_idx, smoothing=0.0):
-        super(LabelSmoothing, self).__init__()
-        self.criterion = nn.KLDivLoss(reduction='sum')
-        self.padding_idx = padding_idx
-        self.confidence = 1.0 - smoothing
-        self.smoothing = smoothing
-        self.size = size
-        self.true_dist = None
-        
-    def forward(self, x, target):
-        assert x.size(1) == self.size
-        true_dist = x.data.clone()
-        true_dist.fill_(self.smoothing / (self.size - 2))
-        true_dist.scatter_(1, target.data.unsqueeze(1), self.confidence)
-        true_dist[:, self.padding_idx] = 0
-        mask = torch.nonzero(target.data == self.padding_idx)
-        if mask.dim() > 0:
-            true_dist.index_fill_(0, mask.squeeze(), 0.0)
-        self.true_dist = true_dist
-        return self.criterion(x, true_dist)
-
-
-class NoamOpt:
-    "Optim wrapper that implements rate."
-    def __init__(self, model_size, factor, warmup, optimizer):
-        self.optimizer = optimizer
-        self._step = 0
-        self.warmup = warmup
-        self.factor = factor
-        self.model_size = model_size
-        self._rate = 0
-        
-    def step(self):
-        "Update parameters and rate"
-        self._step += 1
-        rate = self.rate()
-        for p in self.optimizer.param_groups:
-            p['lr'] = rate
-        self._rate = rate
-        self.optimizer.step()
-        
-    def rate(self, step = None):
-        "Implement `lrate` above"
-        if step is None:
-            step = self._step
-        return self.factor * \
-            (self.model_size ** (-0.5) *
-            min(step ** (-0.5), step * self.warmup ** (-1.5)))
-
-def get_attn_key_pad_mask(seq_k, seq_q):
-    ''' For masking out the padding part of key sequence. '''
-
-    # Expand to fit the shape of key query attention matrix.
-    len_q = seq_q.size(1)
-    padding_mask = seq_k.eq(config.PAD_idx)
-    padding_mask = padding_mask.unsqueeze(1).expand(-1, len_q, -1)  # b x lq x lk
-
-    return padding_mask
-

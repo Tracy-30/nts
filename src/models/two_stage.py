@@ -2,11 +2,10 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from modules.transformer_layers import DecoderLayer, LayerNorm
+from models.transformer_layers import DecoderLayer, LayerNorm
 from models.utils import _gen_bias_mask , _gen_timing_signal, _get_attn_subsequent_mask
 from config import cfg
 
-# from transformers import BertModel
 from pytorch_pretrained_bert import BertModel
 
 class Encoder(nn.Module):
@@ -23,11 +22,14 @@ class Encoder(nn.Module):
         self.eval_() # always in eval mode
 
     def forward(self, input, mask, token_type_ids):
+        """
+        input: [bs, T]
+        output: [bs, T, embedding_size=768]
+        """
 
         with torch.no_grad():
             encoder_outputs, _ = self.encoder(input, attention_mask=mask, token_type_ids=token_type_ids,
                                                                 output_all_encoded_layers=False)
-
         return encoder_outputs
     
     def eval_(self):
@@ -38,27 +40,23 @@ class Encoder(nn.Module):
 class Decoder(nn.Module):
     """
     A Transformer Decoder module. 
-    Inputs should be in the shape [batch_size, length, hidden_size]
-    Outputs will have the shape [batch_size, length, hidden_size]
     """
     def __init__(self, embedding_size, hidden_size, num_layers, num_heads, total_key_depth, total_value_depth,
                  filter_size, max_length=cfg[cfg['data_name']]['decoder_max_length'], input_dropout=0.0, layer_dropout=0.0, 
                  attention_dropout=0.0, relu_dropout=0.0):
         """
-        Parameters:
-            embedding_size: Size of embeddings
-            hidden_size: Hidden size
-            num_layers: Total layers in the Encoder
-            num_heads: Number of attention heads
-            total_key_depth: Size of last dimension of keys. Must be divisible by num_head
-            total_value_depth: Size of last dimension of values. Must be divisible by num_head
-            output_depth: Size last dimension of the final output
-            filter_size: Hidden size of the middle layer in FFN
-            max_length: Max sequence length (required for timing signal)
-            input_dropout: Dropout just after embedding
-            layer_dropout: Dropout for each layer
-            attention_dropout: Dropout probability after attention (Should be non-zero only during training)
-            relu_dropout: Dropout probability after relu in FFN (Should be non-zero only during training)
+        num_layers: Number of attention layers
+        num_heads: Number of attention heads
+        total_key_depth: Size of last dimension of keys. Must be divisible by num_head
+        total_value_depth: Size of last dimension of values. Must be divisible by num_head
+        filter_size: Hidden size of the middle layer in FFN
+
+        max_length: max sequence length
+
+        input_dropout: Dropout after embedding
+        layer_dropout: Dropout of each layer
+        attention_dropout: Dropout after attention 
+        relu_dropout: Dropout after relu in FFN
         """
         
         super(Decoder, self).__init__()
@@ -69,45 +67,43 @@ class Decoder(nn.Module):
         
         self.mask = _get_attn_subsequent_mask(max_length) # mask to hide future
 
-        params =(hidden_size, 
-                total_key_depth or hidden_size,
-                total_value_depth or hidden_size,
-                filter_size, 
-                num_heads, 
-                _gen_bias_mask(max_length), # mandatory
-                layer_dropout, 
-                attention_dropout, 
-                relu_dropout)
+        params =(hidden_size, total_key_depth or hidden_size, total_value_depth or hidden_size, filter_size, 
+                num_heads, _gen_bias_mask(max_length), layer_dropout, attention_dropout, relu_dropout)
         
         self.embedding_proj = nn.Linear(embedding_size, hidden_size, bias=False)
 
-        # input to decoder: tuple consisting of decoder inputs and encoder output
-        self.dec = nn.Sequential(*[DecoderLayer(*params) for l in range(num_layers)])
+        self.dec = nn.Sequential(*[DecoderLayer(*params) for _ in range(num_layers)])
         
         self.layer_norm = LayerNorm(hidden_size)
         self.input_dropout = nn.Dropout(input_dropout)
 
     def forward(self, inputs, encoder_output, mask):
+        """
+        inputs: [bs, T, hidden_size]
+        outputs: [bs, T, hidden_size]
+        """
+
         mask_src, mask_trg = mask
         if mask_trg is not None:
             dec_mask = torch.gt(mask_trg + self.mask[:, :mask_trg.size(-1), :mask_trg.size(-1)], 0)
         else:
             dec_mask = None
-        # Add input dropout
+
+        # dropout input
         x = self.input_dropout(inputs)
-        # print("x: ", x.shape)
-        # Project to hidden size
-        # print('embedding_prject: ', self.embedding_proj)
+        
+        # timing signal
         x = self.embedding_proj(x)
         x += self.timing_signal[:, :inputs.shape[1], :].type_as(inputs.data)
 
         # Project to hidden size
         encoder_output = self.embedding_proj(encoder_output) #.transpose
-        # Run decoder. Input: x, encoder_outputs, attention_weight, mask_src, dec_mask
+
         y, _, attn_dist, _ = self.dec((x, encoder_output, [], (mask_src,dec_mask)))
 
-        # Final layer normalization
+        # Layer normalization
         y = self.layer_norm(y)
+
         return y, attn_dist
 
 class LOGIT_LAYER(nn.Module):

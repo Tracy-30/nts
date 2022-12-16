@@ -1,17 +1,16 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
-
-from transformers import BertTokenizerFast
-
-from modules.two_stage import Encoder, Decoder, LOGIT_LAYER, COPY_LAYER
-from modules.search import Greedy_Search
+from models.two_stage import Encoder, Decoder, LOGIT_LAYER, COPY_LAYER
+from models.search import Greedy_Search
+from dataset.utils import tokenize_with_truncation
 
 from config import cfg
-from utils import check_exists, makedir_exist_ok, make_optimizer, make_scheduler
-from modules.regularize import LabelSmoothing
+from utils import make_optimizer, make_scheduler
+from models.regularize import LabelSmoothing
+
 import transformers
+from pytorch_pretrained_bert import BertTokenizer
 
 import os
 os.environ['CUDA_VISIBLE_DEVICES'] = str(cfg['cuda_device'])
@@ -90,9 +89,7 @@ class Two_Stage_Summarizer(nn.Module):
         self.two_stage = two_stage
 
         # BERT Tokenizer
-        self.tokenizer = BertTokenizerFast.from_pretrained("bert-base-uncased")
-        self.tokenizer.bos_token = self.tokenizer.cls_token
-        self.tokenizer.eos_token = self.tokenizer.sep_token
+        self.tokenizer = BertTokenizer.from_pretrained("bert-base-uncased")
 
         # BERT Pre-trained Encoder
         self.encoder = Encoder()
@@ -142,10 +139,8 @@ class Two_Stage_Summarizer(nn.Module):
         # self.beam_search = 
 
     def train_one_batch(self, batch, train=True):
-        input_ids, input_mask, input_type_ids, _, _, _ = get_input_from_batch(batch)
-        target_ids, target_mask, target_type_ids, _, _ = get_output_from_batch(batch)
-
-        # self.encoder.eval_()
+        input_ids, input_mask, input_type_ids = batch["input_ids"], batch["input_mask"], batch["input_type_ids"]
+        target_ids, target_mask, target_type_ids, _, _ = batch["target_ids"], batch["target_mask"], batch["target_type_ids"]
 
         if train:
             self.optimizer.zero_grad()
@@ -179,7 +174,7 @@ class Two_Stage_Summarizer(nn.Module):
         return {'model_loss':model_loss, 'stage1_loss': stage1_loss, 'stage2_loss': stage2_loss}
 
     def test_one_batch(self, batch, method='greedy'): # Test Batch_Size = 1
-        input_ids, input_mask, input_type_ids, _, _, _ = get_input_from_batch(batch)
+        input_ids, input_mask, input_type_ids = batch["input_ids"], batch["input_mask"], batch["input_type_ids"]
 
         # self.encoder.eval_()
         encoder_output = self.encoder(input_ids, input_mask, input_type_ids)
@@ -207,7 +202,7 @@ class Two_Stage_Summarizer(nn.Module):
 
     def refine_decode(self, output_logit): # batch_size = 1
         """Greedy Bi-Directional Context Decode"""
-        decoded_words, sent = [], []
+        decoded_words = []
         _, word_indice = torch.max(output_logit, dim = -1)
         decoded_words = self.tokenizer.convert_ids_to_tokens(word_indice.squeeze().tolist())
 
@@ -233,49 +228,29 @@ class Two_Stage_Summarizer(nn.Module):
             pred_sent = self.test_one_batch(batch)
             return pred_sent
 
-def get_input_from_batch(batch):
-    input_ids = batch["input_ids"]  
-    input_mask = batch["input_mask"]  
-    input_type_ids = batch["input_type_ids"]  
-    batch_size, _ = input_ids.size()
+    def inference(self, article, truncated_size=512, verbose=True):
+        """
+        input: article of string
+        truncated_size: input_truncated_size: default 512
+        output_size: default max 100
+        """
+        batch = tokenize_with_truncation(article, tokenizer=self.tokenizer,truncated_size=truncated_size, padding_idx=cfg['PAD_idx'], t=True)
 
-    extra_zeros = None
-    enc_batch_extend_vocab = None
-
-    # if cfg[cfg['model_name']]['copy_mech']:
-    #     enc_batch_extend_vocab = batch["input_ext_vocab_batch"].transpose(0,1)
-    #     # max_art_oovs is the max over all the article oov list in the batch
-    #     if batch["max_art_oovs"] > 0:
-    #         extra_zeros = torch.zeros((batch_size, batch["max_art_oovs"]))
-
-    coverage = None
-    # if cfg['is_coverage']:
-    #     coverage = torch.zeros(enc_batch.size())
-
-    if cfg['device'] == 'cuda':
-        if enc_batch_extend_vocab is not None: enc_batch_extend_vocab = enc_batch_extend_vocab.cuda()
-        if extra_zeros is not None: extra_zeros = extra_zeros.cuda()
-        if coverage is not None: coverage = coverage.cuda()
-
-    return input_ids, input_mask, input_type_ids, enc_batch_extend_vocab, extra_zeros, coverage
-
-def get_output_from_batch(batch):
-    target_ids = batch["target_ids"]
-    target_mask = batch["target_mask"]
-    target_type_ids = batch["target_type_ids"]
-
-    target_gate,target_ptr = None, None
-    # if(cfg['copy_mech']):
-    #     target_gate = batch["target_gate"]
-    #     target_ptr = batch["target_ptr"]
-    #     target_batch = batch["target_ext_vocab_batch"].transpose(0,1)
-    # else:
-    #     target_batch = dec_batch
+        for input in batch:
+            batch[input].unsqueeze_(0)
         
-    # dec_lens_var = batch["target_lengths"]
-    # dec_padding_mask = sequence_mask(dec_lens_var, max_len=max_dec_len).float()
+        if verbose:
+            print(f"Input_Article: \n{article}")
+            print("-----"*20)
 
-    return target_ids, target_mask, target_type_ids, target_gate, target_ptr #, dec_padding_mask, max_dec_len, dec_lens_var, target_batch
+        print("Running Inference...")
+
+        decoded_summary = self(batch, train=False)
+
+        if verbose:
+            print(f"Predicted Summary: \n{decoded_summary}")
+            
+        return decoded_summary
 
 
 def bert_tokenization(token_seq, bert_tokenizer, seq_length=cfg[cfg['data_name']]['decoder_max_length']):

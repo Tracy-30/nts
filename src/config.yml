@@ -1,6 +1,6 @@
 # data
 data_name: CNN_DAILYMAILS_SMALL
-data_path: /hpc/group/tarokhlab/yg172/data
+data_path: data
 
 CNN_DAILYMAILS:
   encoder_max_length: 512  # avg 691
@@ -14,12 +14,13 @@ CNN_DAILYMAILS_SMALL:
   train_samples: 10000
   test_samples: 100
 
-TLDR_NEWS:
-  encoder_max_length: 80  # avg 79
-  decoder_max_length: 40 # avg 10
-  train_samples: 7000 # 7138 in total
-  test_samples: 200  # 794 in total
+# TLDR_NEWS:
+#   encoder_max_length: 80  # avg 79
+#   decoder_max_length: 40 # avg 10
+#   train_samples: 7000 # 7138 in total
+#   test_samples: 200  # 794 in total
 
+# BERT cfg
 vocab_size: 30522
 UNK_idx: 100
 PAD_idx: 0
@@ -29,10 +30,21 @@ SEP_idx: 102
 EOS_idx: 102
 MASK_idx: 103
 
+# Experiment
+device: cpu
+cuda_device: 2
+seed: 0
+num_workers: 0
+world_size: 1
+num_experiments: 1
+resume_mode: 0
+info_interval: 10
+eval_interval: 500
+
 # model
 model_name: two_stage_summarizer
 search_algorithm: greedy
-save_path: /scratch/yg172/output
+save_path: output
 
 one_stage_summarizer:
   copy_mech: False
@@ -170,7 +182,7 @@ two_stage_summarizer_copy:
   warm_up: False
   num_warmup_partial: 0.05
 
-  num_epochs: 10
+  num_epochs: 20
   batch_size:
     train: 4
     test: 1
@@ -180,13 +192,4 @@ two_stage_summarizer_copy:
 
 pivot_metric: rouge_avg
 
-# Experiment
-device: cuda
-cuda_device: 2
-seed: 0
-num_workers: 0
-world_size: 1
-num_experiments: 1
-resume_mode: 0
-info_interval: 10
-eval_interval: 500
+

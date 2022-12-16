@@ -74,34 +74,6 @@ def recur(fn, input, *args):
         raise ValueError('Not valid input type')
     return output
 
-def process_dataset(dataset):
-    cfg['data_size'] = {'train': len(dataset['train']), 'test': len(dataset['test'])}
-    return
-
-def process_control():
-    data_shape = {'LIBRISPEECH':[1,128,128],'LIBRISPEECH_SMALL':[1,64,64],'CIFAR10':[3, 32, 32],'MNIST':[1, 32, 32]}
-    cfg['data_shape'] = data_shape[cfg['data_name']]
-
-    cfg['vqvae'] = {'hidden_size': 32, 'ch_mult': [1,1,2,4], 'num_res_block': 2, 'embedding_size': 512,
-            'num_embedding': 16384, 'vq_commit': 0.25, 'resolution':128, 'z_channels':128, 'dropout': 0.0,
-            'structure':'vqgan','ema':True,'speaker_embedding':False}
-
-    model_name = cfg['model_name']
-    cfg[model_name]['shuffle'] = {'train': True, 'test': False}
-    cfg[model_name]['batch_size'] = {'train': 12, 'test': 6}
-    cfg[model_name]['optimizer_name'] = 'Adam'
-    cfg[model_name]['lr'] = 5.0e-06
-    cfg[model_name]['momentum'] = 0.9
-    cfg[model_name]['weight_decay'] = 0
-    cfg[model_name]['betas'] = [0.5,0.9]
-    cfg[model_name]['nesterov'] = True
-    cfg[model_name]['scheduler_name'] = 'ReduceLROnPlateau'
-    cfg[model_name]['factor'] = 0.85
-    cfg[model_name]['patience'] = 1
-    cfg[model_name]['threshold'] = 1.0e-4
-    cfg[model_name]['min_lr'] = 1.0e-8
-    cfg[model_name]['num_epochs'] = 50
-    
 def make_optimizer(model, tag):
     if cfg[tag]['optimizer_name'] == 'SGD':
         optimizer = optim.SGD(model.parameters(), lr=cfg[tag]['lr'], momentum=cfg[tag]['momentum'],
@@ -114,7 +86,6 @@ def make_optimizer(model, tag):
     else:
         raise ValueError('Not valid optimizer name')
     return optimizer
-
 
 def make_scheduler(optimizer, tag):
     if cfg[tag]['scheduler_name'] == 'None':

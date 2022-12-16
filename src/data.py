@@ -28,11 +28,6 @@ def fetch_dataset(data_name):
         dataset['train'] = eval('{}(root=root, split=\'train\', tokenizer=tokenizer)'.format('TLDR_NEWS'))
         dataset['test'] = eval('{}(root=root, split=\'test\', tokenizer=tokenizer)'.format('TLDR_NEWS'))
 
-    elif data_name in ['BBC_NEWS']:
-        tokenizer = 'bert-base-uncased'
-        dataset['train'] = eval('{}(root=root, split=\'train\', tokenizer=tokenizer)'.format('BBC_NEWS'))
-        dataset['test'] = eval('{}(root=root, split=\'test\', tokenizer=tokenizer)'.format('BBC_NEWS'))
-
     else:
         raise ValueError('Not valid dataset name')
 

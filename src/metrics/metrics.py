@@ -32,7 +32,7 @@ class Metric(object):
         return metric_name
 
     def make_pivot(self):
-        if cfg['data_name'] in ['CNN_DAILYMAILS', 'CNN_DAILYMAILS_SMALL', 'TLDR_NEWS', 'BBC_NEWS']:
+        if cfg['data_name'] in ['CNN_DAILYMAILS', 'CNN_DAILYMAILS_SMALL', 'TLDR_NEWS']:
             pivot = -float('inf')
             pivot_direction = 'up'
             pivot_name = 'ROUGE'

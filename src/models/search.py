@@ -4,6 +4,9 @@ import numpy as np
 from config import cfg
 
 class Greedy_Search():
+    """
+    This class performs greedy decoding
+    """
     def __init__(self, decoder, output_layer, embedding, tokenizer) -> None:
 
         self.bert_embedding = embedding
@@ -17,7 +20,7 @@ class Greedy_Search():
         """
         returns a list of tokenized decoded sentence (bs=1)
         """
-        # Always start with the SOS_INDEX
+        # Always start with the SOS
         input = torch.ones(1, 1).fill_(cfg['SOS_idx']).long()
         if cfg['device'] == 'cuda':
             input = input.cuda()
@@ -26,20 +29,13 @@ class Greedy_Search():
         decoded_words = []
         for i in range(cfg[cfg['data_name']]['decoder_max_length']):
 
-            # print('input ', i, ': ', input, input.shape)
             embedding_input = self.bert_embedding(input) # Bert Encoding [bs=1, len, 768]
-            # print(embedding_input.shape)
             decoder_output, attn_dist = self.decoder(embedding_input, encoder_output, (None, input_mask))
-            # print(decoder_output.shape, attn_dist.shape)
 
             logit = self.output_layer(decoder_output, attn_dist, input) # [1, len, vocab_size]
             
             _, y_preds = torch.max(logit[:, -1], dim=1)
-            
-            # print(logit[:, -1].shape)
-            # print(y_preds)
-            # print(logit[:, -1])
-
+         
             decoded_words.append(self.bert_tokenizer.convert_ids_to_tokens(y_preds.tolist())[0])
 
             y_preds = y_preds.data[0]
