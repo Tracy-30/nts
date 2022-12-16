@@ -119,36 +119,46 @@ class LOGIT_LAYER(nn.Module):
 
 class COPY_LAYER(nn.Module):
     "Define standard linear + softmax generation step."
-    def __init__(self, hidden_dim, vocab):
+    def __init__(self, hidden_dim, vocab, context=True):
         super(COPY_LAYER, self).__init__()
         self.proj_vocab_dis = nn.Linear(hidden_dim, vocab)
-
-        self.p_gen_layer = nn.Linear(cfg[cfg['model_name']]['param']['hidden_size'], 1)
+        if context:
+            self.p_gen_layer = nn.Linear(cfg[cfg['model_name']]['param']['hidden_size']+768, 1)
+        else:
+            self.p_gen_layer = nn.Linear(cfg[cfg['model_name']]['param']['hidden_size'], 1)
         self.act = nn.Sigmoid()
 
-    def forward(self, x, attn_dist, enc_input):
+    def forward(self, x, attn_dist, enc_input, enc_output):
         """x: [bs, dec_len=100, hidden_dim]  attn_dist: [bs, dec_len=100, input_length=512]  enc_input: [bs, input_length=512]"""
         """enc_output: [bs, input_length, embedding_size]"""
         
-        # context_vector = attn_dist.bmm(enc_output) # [bs, dec_len=100, embedding_size]
+        if attn_dist is None: # No Copy
+            logit = self.proj_vocab_dis(x)
+            log_probs = F.log_softmax(logit, dim=-1)
+            return log_probs
 
-        # mix = torch.cat((context_vector, x), dim=2) # [bs, dec_len=100, embedding_size + hidden_dim]
+        else: # Copy
+            if enc_output is not None: # Use Context Vector
+                context_vector = attn_dist.bmm(enc_output) # [bs, dec_len=100, embedding_size]
+                mix = torch.cat((context_vector, x), dim=2) # [bs, dec_len=100, embedding_size + hidden_dim]
+                p_gen = self.p_gen_layer(mix) # [bs, dec_len=100, 1]
 
-        # print(mix.shape)
+            else: # Don't Use Context Vector
+                p_gen = self.p_gen_layer(x)
+            
 
-        p_gen = self.p_gen_layer(x) # [bs, dec_len=100, 1]
-        p_gen = self.act(p_gen) # [bs, dec_len=100, 1]
-        
-        logit = self.proj_vocab_dis(x) # [bs, dec_len=100, vocab_size]
-        vocab_dist = F.softmax(logit, dim=2)    # [bs, dec_len=100, vocab_size]
-        vocab_dist_ = p_gen * vocab_dist        # [bs, dec_len=100, vocab_size]
+            p_gen = self.act(p_gen) # [bs, dec_len=100, 1]
+            
+            logit = self.proj_vocab_dis(x) # [bs, dec_len=100, vocab_size]
+            vocab_dist = F.softmax(logit, dim=2)    # [bs, dec_len=100, vocab_size]
+            vocab_dist_ = p_gen * vocab_dist        # [bs, dec_len=100, vocab_size]
 
-        attn_dist = F.softmax(attn_dist, dim=2) # [bs, dec_len=100, input_length]
-        attn_dist = (1 - p_gen) * attn_dist     # [bs, dec_len=100, input_length]
+            attn_dist = F.softmax(attn_dist, dim=2) # [bs, dec_len=100, input_length]
+            attn_dist = (1 - p_gen) * attn_dist     # [bs, dec_len=100, input_length]
 
-        enc_input = enc_input.unsqueeze(1).repeat(1,x.size(1),1)
-        
-        logit = torch.log(vocab_dist_.scatter_add(2, enc_input, attn_dist))
+            enc_input = enc_input.unsqueeze(1).repeat(1,x.size(1),1)
+            
+            logit = torch.log(vocab_dist_.scatter_add(2, enc_input, attn_dist))
         
         return logit
         

@@ -102,9 +102,10 @@ class Two_Stage_Summarizer(nn.Module):
 
         # Output Layer 
         if cfg[self.model_name]['copy_mech']: # copy pointer-generator
-            self.output_layer = COPY_LAYER(hidden_size, cfg['vocab_size'])
+            self.draft_output_layer = COPY_LAYER(hidden_size, cfg['vocab_size'],context=True)
         else:
-            self.output_layer = LOGIT_LAYER(hidden_size, cfg['vocab_size'])
+            self.draft_output_layer = LOGIT_LAYER(hidden_size, cfg['vocab_size'])
+        self.refine_output_layer = LOGIT_LAYER(hidden_size, cfg['vocab_size'])
 
         if cfg[self.model_name]['label_smooth'] > 0: 
             self.criterion = LabelSmoothing(size=cfg['vocab_size'], padding_idx=cfg['PAD_idx'], 
@@ -125,7 +126,8 @@ class Two_Stage_Summarizer(nn.Module):
         if cfg['device'] == 'cuda':
             self.encoder = self.encoder.cuda()
             self.decoder = self.decoder.cuda()
-            self.output_layer = self.output_layer.cuda()
+            self.draft_output_layer = self.draft_output_layer.cuda()
+            self.refine_output_layer = self.refine_output_layer.cuda()
             self.criterion = self.criterion.cuda()
 
         # Two Decoding Modules
@@ -134,9 +136,9 @@ class Two_Stage_Summarizer(nn.Module):
 
         # Searching Algorithms for Inference
         
-        self.greedy_search = Greedy_Search(self.decoder, self.output_layer, self.encoder.embedding, self.tokenizer)
+        self.greedy_search = Greedy_Search(self.decoder, self.draft_output_layer, self.encoder.embedding, self.tokenizer)
         
-        # self.beam_search = 
+        # self.beam_search
 
     def train_one_batch(self, batch, train=True):
         input_ids, input_mask, input_type_ids = batch["input_ids"], batch["input_mask"], batch["input_type_ids"]
@@ -149,13 +151,13 @@ class Two_Stage_Summarizer(nn.Module):
         encoder_output = self.encoder(input_ids, input_mask, input_type_ids)
         decoder_output_1, attn_dist_1 = self.draft_decoder(target_ids, encoder_output)
 
-        stage1_logit = self.output_layer(decoder_output_1,attn_dist=attn_dist_1, enc_input=input_ids)
+        stage1_logit = self.draft_output_layer(decoder_output_1,attn_dist=attn_dist_1, enc_input=input_ids, enc_output=encoder_output)
         stage1_loss = self.criterion(stage1_logit.contiguous().view(-1, stage1_logit.size(-1)), target_ids.contiguous().view(-1))
 
         if self.two_stage:
             # Second Stage Training (Teacher Forcing)
             decoder_output_2, attn_dist_2 = self.refine_decoder(target_ids, target_mask, target_type_ids, encoder_output)
-            stage2_logit = self.output_layer(decoder_output_2,attn_dist=attn_dist_2, enc_input=input_ids)
+            stage2_logit = self.refine_output_layer(decoder_output_2,attn_dist=None, enc_input=None)
             stage2_loss = self.criterion(stage2_logit.contiguous().view(-1, stage2_logit.size(-1)), target_ids.contiguous().view(-1))
         
         else: stage2_loss = torch.tensor(0, device=cfg['device'])
@@ -194,7 +196,7 @@ class Two_Stage_Summarizer(nn.Module):
             draft_input, draft_input_mask, draft_summ_batch = bert_tokenization(draft_output, self.tokenizer)
             
             model_output, attn_dist = self.refine_decoder(draft_input, draft_input_mask, draft_summ_batch, encoder_output)
-            model_output = self.output_layer(model_output, attn_dist, input_ids) # [bs=1, dec_step=100, vocab_size]
+            model_output = self.refine_output_layer(model_output, None, None) # [bs=1, dec_step=100, vocab_size]
 
             refine_output = self.refine_decode(model_output)
 
@@ -249,7 +251,7 @@ class Two_Stage_Summarizer(nn.Module):
 
         if verbose:
             print(f"Predicted Summary: \n{decoded_summary}")
-            
+
         return decoded_summary
 
 
