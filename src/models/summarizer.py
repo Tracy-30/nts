@@ -150,8 +150,11 @@ class Two_Stage_Summarizer(nn.Module):
         # First Stage Training (Teacher Forcing)
         encoder_output = self.encoder(input_ids, input_mask, input_type_ids)
         decoder_output_1, attn_dist_1 = self.draft_decoder(target_ids, encoder_output)
-
-        stage1_logit = self.draft_output_layer(decoder_output_1,attn_dist=attn_dist_1, enc_input=input_ids, enc_output=encoder_output)
+        
+        if cfg[self.model_name]['copy_mech']:
+            stage1_logit = self.draft_output_layer(decoder_output_1,attn_dist=attn_dist_1, enc_input=input_ids, enc_output=encoder_output)
+        else:
+            stage1_logit = self.draft_output_layer(decoder_output_1,attn_dist=attn_dist_1, enc_input=input_ids)
         stage1_loss = self.criterion(stage1_logit.contiguous().view(-1, stage1_logit.size(-1)), target_ids.contiguous().view(-1))
 
         if self.two_stage:

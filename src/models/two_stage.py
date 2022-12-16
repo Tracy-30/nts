@@ -145,7 +145,6 @@ class COPY_LAYER(nn.Module):
 
             else: # Don't Use Context Vector
                 p_gen = self.p_gen_layer(x)
-            
 
             p_gen = self.act(p_gen) # [bs, dec_len=100, 1]
             
@@ -153,13 +152,15 @@ class COPY_LAYER(nn.Module):
             vocab_dist = F.softmax(logit, dim=2)    # [bs, dec_len=100, vocab_size]
             vocab_dist_ = p_gen * vocab_dist        # [bs, dec_len=100, vocab_size]
 
+            # attn_dist[:,:,0], attn_dist[:,:,-1] = 0, 0 # Avoid [CLS] and [SEP] tokens
+
             attn_dist = F.softmax(attn_dist, dim=2) # [bs, dec_len=100, input_length]
             attn_dist = (1 - p_gen) * attn_dist     # [bs, dec_len=100, input_length]
 
-            enc_input = enc_input.unsqueeze(1).repeat(1,x.size(1),1)
-            
-            logit = torch.log(vocab_dist_.scatter_add(2, enc_input, attn_dist))
-        
-        return logit
+            add_position = enc_input.unsqueeze(1).repeat(1,x.size(1),1) # Avoid [CLS] and [SEP] tokens
+
+            logit = torch.log(vocab_dist_.scatter_add(2, add_position, attn_dist))
+                    
+            return logit
         
 

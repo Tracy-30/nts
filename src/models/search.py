@@ -32,7 +32,10 @@ class Greedy_Search():
             embedding_input = self.bert_embedding(input) # Bert Encoding [bs=1, len, 768]
             decoder_output, attn_dist = self.decoder(embedding_input, encoder_output, (None, input_mask))
 
-            logit = self.output_layer(decoder_output, attn_dist, input, encoder_output) # [1, len, vocab_size]
+            if cfg[cfg['model_name']]['copy_mech']:
+                logit = self.output_layer(decoder_output, None, None, None) # [1, len, vocab_size]
+            else:
+                logit = self.output_layer(decoder_output, None, None) # [1, len, vocab_size]
             
             _, y_preds = torch.max(logit[:, -1], dim=1)
          
