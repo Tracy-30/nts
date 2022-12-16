@@ -34,4 +34,4 @@ More specific model parameters can be tuned in config.yml
 
 ## Inference
 
-To make model inference, we also provide a infer.ipynb file to show some examples.
+To make model inference, we also provide a inference.ipynb file to show some examples.
