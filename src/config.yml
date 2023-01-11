@@ -1,6 +1,6 @@
 # data
 data_name: CNN_DAILYMAILS_SMALL
-data_path: data
+data_path: /Users/tracy/Desktop/data
 
 CNN_DAILYMAILS:
   encoder_max_length: 512  # avg 691

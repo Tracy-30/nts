@@ -2,13 +2,15 @@ import os
 import csv
 import torch
 from numpy.random import default_rng
-
+from tqdm import tqdm
 
 from config import cfg
 from torch.utils.data import Dataset
 from pytorch_pretrained_bert import BertTokenizer
 from utils import check_exists, makedir_exist_ok, save, load
 from dataset.utils import tokenize_with_truncation
+
+from datasets import load_dataset
 
 '''CNN/Daily Mail Dataset'''
 class CNNDM(Dataset):
@@ -98,9 +100,9 @@ class CNNDM(Dataset):
             torch.stack(target_mask), torch.stack(target_type_ids)
 
 
-'''A Small Version CNN/Daily Mail Dataset'''
+'''A Customized Version CNN/Daily Mail Dataset'''
 class CNNDM_SMALL(Dataset):
-    def __init__(self, root, split, tokenizer="bert-base-uncased", train_size=10000, test_size=100):
+    def __init__(self, root, split, tokenizer="bert-base-uncased", train_size=220000, test_size=1000):
         '''
         root: root PATH
         split: train/test
@@ -117,26 +119,26 @@ class CNNDM_SMALL(Dataset):
         if not check_exists(self.processed_folder):
             self.process()
 
-        self.dataset = load(os.path.join(self.processed_folder, '{}.pt'.format(self.split)), mode='torch')
-        self.tgt_txt = load(os.path.join(self.processed_folder, '{}_tgt.pickle'.format(self.split)), mode='pickle')
+        self.data = load(os.path.join(self.processed_folder, '{}.pickle'.format(self.split)), mode='pickle')
 
 
     def __getitem__(self, idx):
-        bert_tokenized_feat = { 'input_ids':self.dataset[0][idx], 
-                                'input_mask':self.dataset[1][idx], 
-                                'input_type_ids':self.dataset[2][idx],
-                                'target_ids':self.dataset[3][idx], 
-                                'target_mask':self.dataset[4][idx], 
-                                'target_type_ids':self.dataset[5][idx]}
-        bert_tokenized_feat['target_text'] = self.tgt_txt[idx]
+        
+        input_ids, input_mask, input_type_ids = tokenize_with_truncation(self.data['article'][idx], self.bert_tokenizer, 
+                                        truncated_size=cfg[cfg['data_name']]['encoder_max_length'], padding_idx=cfg['PAD_idx'], t=True)
 
-        # input should have length 512
-        # output should have length 100
+        output_ids, output_mask, output_type_ids = tokenize_with_truncation(self.data['summary'][idx], self.bert_tokenizer, 
+                                        truncated_size=cfg[cfg['data_name']]['encoder_max_length'], padding_idx=cfg['PAD_idx'], t=True)
 
-        return bert_tokenized_feat
+        return {
+                    'input_ids': input_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids,
+                    'target_ids': output_ids, 'target_mask': output_mask, 'target_type_ids': output_type_ids,
+                    'target_text': self.data['summary'][idx]
+                    }
+        
 
     def __len__(self):
-        return len(self.dataset[0])
+        return len(self.data['article'])
 
     @property
     def processed_folder(self):
@@ -151,49 +153,33 @@ class CNNDM_SMALL(Dataset):
         train_data = self.make_data(split='train')
         test_data = self.make_data(split='test')
 
-        save(train_data[1:7], os.path.join(self.processed_folder, 'train.pt'), mode='torch')
-        save(test_data[1:7], os.path.join(self.processed_folder, 'test.pt'), mode='torch')
-
-        save(train_data[0], os.path.join(self.processed_folder, 'train_tgt.pickle'), mode='pickle')
-        save(test_data[0], os.path.join(self.processed_folder, 'test_tgt.pickle'), mode='pickle')
+        save(train_data, os.path.join(self.processed_folder, 'train.pickle'), mode='pickle')
+        save(test_data, os.path.join(self.processed_folder, 'test.pickle'), mode='pickle')
 
         return
 
     def make_data(self, split):
-        input_ids, input_mask, input_type_ids = [], [], []
-        target_ids, target_mask, target_type_ids = [], [], []
+        article, summary = [], []
+        
+        if split == 'train': 
+            dataset = load_dataset("cnn_dailymail", "3.0.0", split='train') 
+        elif split == 'test':
+            dataset = load_dataset("cnn_dailymail", "3.0.0", split='validation')
 
-        target_text = []
-
-        total_sample = 287227 if split=='train' else 11490
+        total_sample = 287113 if split=='train' else 13368
         max_sample = self.train_size if split=='train' else self.test_size
 
+        
         rng = default_rng()
         sample_idx = rng.choice(total_sample, size=max_sample, replace=False)
 
-        with open(self.raw_folder + f'/{split}.csv') as csv_file:
-            csv_reader = csv.reader(csv_file, delimiter=',')
-            c = 0
-            for row in csv_reader:
-                if c >= 1 and c in sample_idx: # avoid column name
-                    target_text.append(row[1])
+        for i, ist in tqdm(enumerate(dataset)):
+            
+            if i in sample_idx: # avoid column name
+                article.append(ist['article'])
+                summary.append(ist['highlights'])
 
-                    input_data = tokenize_with_truncation(input=row[0],tokenizer=self.bert_tokenizer,
-                            truncated_size=cfg[cfg['data_name']]['encoder_max_length'],padding_idx=cfg['PAD_idx'],t=True)
-
-                    target_data = tokenize_with_truncation(input=row[1],tokenizer=self.bert_tokenizer,
-                            truncated_size=cfg[cfg['data_name']]['decoder_max_length'],padding_idx=cfg['PAD_idx'],t=True)
-
-                    input_ids.append(input_data['input_ids'])
-                    input_mask.append(input_data['input_mask'])
-                    input_type_ids.append(input_data['input_type_ids'])
-
-                    target_ids.append(target_data['input_ids'])
-                    target_mask.append(target_data['input_mask'])
-                    target_type_ids.append(target_data['input_type_ids'])
-                c += 1
-
-        return target_text, torch.stack(input_ids), torch.stack(input_mask), torch.stack(input_type_ids), torch.stack(target_ids), \
-            torch.stack(target_mask), torch.stack(target_type_ids)
+        return {'article': article, 
+                'summary': summary}
 
     

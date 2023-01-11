@@ -142,7 +142,7 @@ class Two_Stage_Summarizer(nn.Module):
 
     def train_one_batch(self, batch, train=True):
         input_ids, input_mask, input_type_ids = batch["input_ids"], batch["input_mask"], batch["input_type_ids"]
-        target_ids, target_mask, target_type_ids, _, _ = batch["target_ids"], batch["target_mask"], batch["target_type_ids"]
+        target_ids, target_mask, target_type_ids = batch["target_ids"], batch["target_mask"], batch["target_type_ids"]
 
         if train:
             self.optimizer.zero_grad()

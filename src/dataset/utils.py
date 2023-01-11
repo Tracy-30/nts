@@ -34,7 +34,7 @@ def tokenize_with_truncation(input, tokenizer, truncated_size, padding_idx, t=Fa
         input_mask = torch.LongTensor(input_mask)
         input_type_ids = torch.LongTensor(input_type_ids)
 
-    return {'input_ids': input_ids, 'input_mask': input_mask, 'input_type_ids': input_type_ids}
+    return input_ids, input_mask, input_type_ids
 
 
 def extend_vocab(input_token_seq, output_token_seq, vocab_size, tokenizer):
